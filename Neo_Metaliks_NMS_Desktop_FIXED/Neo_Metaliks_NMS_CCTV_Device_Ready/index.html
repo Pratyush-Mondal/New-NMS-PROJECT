@@ -1,0 +1,2081 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Neo Metaliks | NMS Control Center</title>
+<link rel="stylesheet" href="style.css">
+<script>
+(async function checkAuthentication() {
+
+    const token = localStorage.getItem("access_token");
+
+    if (!token) {
+        window.location.href = "login.html";
+        return;
+    }
+
+    try {
+
+        const response = await fetch(
+            "http://192.168.115.79:8000/api/auth/me",
+            {
+                method: "GET",
+                headers: {
+                    "Authorization": "Bearer " + token
+                }
+            }
+        );
+
+        if (!response.ok) {
+            throw new Error("Invalid or expired token");
+        }
+
+        const data = await response.json();
+
+        if (!data.success || !data.admin) {
+            throw new Error("Authentication failed");
+        }
+
+        // সর্বশেষ admin information update
+        localStorage.setItem("admin_id", data.admin.id);
+        localStorage.setItem("admin_name", data.admin.name);
+        localStorage.setItem("admin_email", data.admin.email);
+        localStorage.setItem("admin_phone", data.admin.phone || "");
+        localStorage.setItem("admin_department", data.admin.department || "");
+        localStorage.setItem("admin_location", data.admin.location || "");
+
+        console.log("NMS Authentication verified.");
+
+    } catch (error) {
+
+        console.error("Authentication error:", error);
+
+        localStorage.removeItem("access_token");
+        localStorage.removeItem("adminLoggedIn");
+        localStorage.removeItem("loggedIn");
+
+        window.location.href = "login.html";
+    }
+
+})();
+</script>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <div class="logo">NM</div>
+      <div><b>NEO METALIKS</b><small>NMS CONTROL CENTER</small></div>
+    </div>
+    <div class="nav-title">MAIN</div>
+    <nav>
+      <a href="#dashboard" class="nav active" data-page="dashboard"><span>⌂</span>Dashboard</a>
+      <a href="#devices" class="nav" data-page="devices"><span>◈</span>Devices <em>48</em></a>
+      <a href="#cameras" class="nav" data-page="cameras"><span>▣</span>CCTV Cameras <em>24</em></a>
+      <!-- ADD THIS -->
+<a href="#network" class="nav" data-page="network">
+    <span>⌁</span>Network Map </a>
+   <a href="#desktops" class="nav" data-page="desktops">
+    <span>🖥️</span>Desktop Management
+</a>
+      <div class="nav-title">OPERATIONS</div>
+      <a href="#alerts" class="nav" data-page="alerts"><span>⚠</span>Alerts <em class="danger-badge">3</em></a>
+    
+       <a href="#reports" class="nav" data-page="reports"><span>▥</span>Reports</a>
+      <div class="nav-title">SYSTEM</div>
+      <a href="#settings" class="nav" data-page="settings"><span>⚙</span>Settings</a>
+
+    </nav>
+    <div class="side-bottom">
+      <span class="online-dot"></span>
+      <div><b>Monitoring Online</b><small>All services operational</small></div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div class="top-left">
+        <button class="menu" id="menuBtn">☰</button>
+        <div><span class="crumb">NEO METALIKS / NMS</span><h1 id="pageHeading">Network Monitoring Dashboard</h1></div>
+      </div>
+      <div class="top-right">
+        <div class="live"><i></i> LIVE</div>
+        <div class="clock" id="clock">00:00:00</div>
+        <button class="bell" onclick="toast('No new critical notifications')">♢<sup>3</sup></button>
+       <div class="user-profile" id="adminButton">
+    <div class="admin-avatar">A</div>
+
+    <div class="admin-info">
+        <strong>Administrator</strong>
+        <small>System Admin</small>
+    </div>
+
+    <span class="admin-arrow">▼</span>
+</div>
+
+<div class="admin-menu" id="adminMenu">
+    <div class="admin-menu-header">
+        <div class="admin-large-avatar">A</div>
+        <div>
+            <strong>Administrator</strong>
+            <small>System Admin</small>
+        </div>
+    </div>
+
+    <button type="button" class="admin-menu-item" onclick="openAdminProfile()">
+        👤 <span>Admin Profile</span>
+    </button>
+
+    <button type="button" class="admin-menu-item" onclick="openAdminSettings()">
+        ⚙️ <span>Admin Settings</span>
+    </button>
+
+    <button type="button" class="admin-menu-item" onclick="showAdminActivity()">
+        📋 <span>Activity Log</span>
+    </button>
+
+    <button type="button" class="admin-menu-item logout-item" onclick="adminLogout()">
+        🚪 <span>Logout</span>
+    </button>
+</div>
+      </div>
+    </header>
+    <div class="pages">
+
+      <!-- ADMINISTRATOR PROFILE -->
+      <section class="page" id="admin-profile-page">
+
+    <!-- Breadcrumb -->
+
+    <div class="profile-breadcrumb">
+
+        <span>⌂</span>
+
+        <span>›</span>
+
+        <span>Administrator</span>
+
+        <span>›</span>
+
+        <strong>Profile</strong>
+
+    </div>
+
+
+    <!-- Page Heading -->
+
+    <div class="profile-page-heading">
+
+        <h1>Administrator Profile</h1>
+
+        <p>
+            Manage your administrator information and settings
+        </p>
+
+    </div>
+
+
+    <!-- Profile Layout -->
+
+    <div class="administrator-profile-layout">
+
+
+        <!-- =====================================
+             LEFT PROFILE CARD
+        ====================================== -->
+
+        <div class="administrator-card">
+
+            <div class="profile-avatar-large"
+                 id="profileAvatarLarge">
+
+                A
+
+            </div>
+
+
+            <h2 id="profileDisplayName">
+                Administrator
+            </h2>
+
+            <p class="profile-role">
+                System Admin
+            </p>
+
+
+            <div class="profile-status">
+
+                <span></span>
+
+                Active
+
+            </div>
+
+
+            <div class="profile-divider"></div>
+
+
+            <!-- Details -->
+
+            <div class="profile-detail">
+
+                <span class="detail-icon">👤</span>
+
+                <div>
+
+                    <small>Full Name</small>
+
+                    <strong id="displayFullName">
+                        Administrator
+                    </strong>
+
+                </div>
+
+            </div>
+
+
+            <div class="profile-detail">
+
+                <span class="detail-icon">✉</span>
+
+                <div>
+
+                    <small>Email</small>
+
+                    <strong id="displayEmail">
+                        admin@neometaliks.com
+                    </strong>
+
+                </div>
+
+            </div>
+
+
+            <div class="profile-detail">
+
+                <span class="detail-icon">☎</span>
+
+                <div>
+
+                    <small>Phone</small>
+
+                    <strong id="displayPhone">
+                        +91 9876543210
+                    </strong>
+
+                </div>
+
+            </div>
+
+
+            <div class="profile-detail">
+
+                <span class="detail-icon">🛡</span>
+
+                <div>
+
+                    <small>Role</small>
+
+                    <strong>
+                        System Admin
+                    </strong>
+
+                </div>
+
+            </div>
+
+
+            <div class="profile-detail">
+
+                <span class="detail-icon">🏢</span>
+
+                <div>
+
+                    <small>Department</small>
+
+                    <strong id="displayDepartment">
+                        IT & Network
+                    </strong>
+
+                </div>
+
+            </div>
+
+
+            <div class="profile-detail">
+
+                <span class="detail-icon">📍</span>
+
+                <div>
+
+                    <small>Location</small>
+
+                    <strong id="displayLocation">
+                        Neo Metaliks
+                    </strong>
+
+                </div>
+
+            </div>
+
+
+            <div class="profile-card-footer">
+
+                <strong>Neo Metaliks NMS</strong>
+
+                <span>
+                    Secure • Monitor • Manage
+                </span>
+
+            </div>
+
+        </div>
+
+
+
+        <!-- =====================================
+             RIGHT EDIT PROFILE
+        ====================================== -->
+
+        <div class="edit-profile-card">
+
+            <div class="edit-profile-heading">
+
+                <h2>Edit Profile</h2>
+
+                <p>
+                    Update your personal information and profile details
+                </p>
+
+            </div>
+
+
+            <!-- Photo Upload -->
+
+            <div class="profile-upload-area">
+
+                <div class="profile-avatar-edit"
+                     id="editProfileAvatar">
+
+                    A
+
+                </div>
+
+
+                <div class="photo-upload-box"
+                     onclick="document.getElementById('profileImageInput').click()">
+
+                    <div class="upload-icon">
+                        ↑
+                    </div>
+
+                    <strong>
+                        Change Profile Photo
+                    </strong>
+
+                    <span>
+                        Click to upload or drag and drop
+                    </span>
+
+                    <small>
+                        JPG, PNG - Max 2MB
+                    </small>
+
+                </div>
+
+            </div>
+
+
+            <input
+                type="file"
+                id="profileImageInput"
+                accept="image/png,image/jpeg"
+                hidden
+            >
+
+
+            <!-- Form -->
+
+            <form id="adminProfileForm">
+
+                <div class="profile-form-grid">
+
+
+                    <!-- Full Name -->
+
+                    <div class="profile-form-group">
+
+                        <label>
+                            👤 Full Name
+                            <span>*</span>
+                        </label>
+
+                        <input
+                            type="text"
+                            id="adminName"
+                            value="Administrator"
+                            required
+                        >
+
+                    </div>
+
+
+                    <!-- Email -->
+
+                    <div class="profile-form-group">
+
+                        <label>
+                            ✉ Email Address
+                            <span>*</span>
+                        </label>
+
+                        <input
+                            type="email"
+                            id="adminEmail"
+                            value="admin@neometaliks.com"
+                            required
+                        >
+
+                    </div>
+
+
+                    <!-- Phone -->
+
+                    <div class="profile-form-group">
+
+                        <label>
+                            ☎ Phone Number
+                            <span>*</span>
+                        </label>
+
+                        <input
+                            type="tel"
+                            id="adminPhone"
+                            value="+91 9876543210"
+                            required
+                        >
+
+                    </div>
+
+
+                    <!-- Role -->
+
+                    <div class="profile-form-group">
+
+                        <label>
+                            🛡 Role
+                        </label>
+
+                        <input
+                            type="text"
+                            value="System Admin"
+                            readonly
+                        >
+
+                    </div>
+
+
+                    <!-- Department -->
+
+                    <div class="profile-form-group">
+
+                        <label>
+                            🏢 Department
+                        </label>
+
+                        <input
+                            type="text"
+                            id="adminDepartment"
+                            value="IT & Network"
+                        >
+
+                    </div>
+
+
+                    <!-- Location -->
+
+                    <div class="profile-form-group">
+
+                        <label>
+                            📍 Location
+                        </label>
+
+                        <input
+                            type="text"
+                            id="adminLocation"
+                            value="Neo Metaliks"
+                        >
+
+                    </div>
+
+                </div>
+
+
+                <!-- Buttons -->
+
+                <div class="profile-form-actions">
+
+                    <button
+                        type="button"
+                        class="profile-cancel-btn"
+                        onclick="cancelProfileEdit()">
+
+                        ✕
+                        Cancel
+
+                    </button>
+
+
+                    <button
+                        type="submit"
+                        class="profile-save-btn">
+
+                        💾
+                        Save Changes
+
+                    </button>
+
+                </div>
+
+            </form>
+
+        </div>
+
+    </div>
+
+</section>
+
+      <!-- DASHBOARD -->
+      <section class="page active" id="dashboard">
+        <div class="hero">
+          <div><span class="tag">● REAL-TIME INFRASTRUCTURE MONITORING</span>
+          <h2>Good morning, Administrator.</h2>
+          <p>Monitor Neo Metaliks' complete IT and security infrastructure from one powerful control center.</p></div>
+          <button class="btn primary" onclick="refreshAll()">↻ Refresh Data</button>
+        </div>
+        <div class="stats">
+          <div class="stat"><div class="stat-icon blue">◈</div><div><small>Total Devices</small><strong id="dashTotal">N/A</strong><span class="positive">▲ 2 online today</span></div></div>
+          <div class="stat"><div class="stat-icon green">✓</div><div><small>Online Devices</small><strong id="dashOnline">N/A</strong><span class="positive">91.7% availability</span></div></div>
+          <div class="stat"><div class="stat-icon red">⚠</div><div><small>Active Alerts</small><strong id="dashAlerts">N/A</strong><span class="negative">Needs attention</span></div></div>
+          <div class="stat"><div class="stat-icon purple">⌁</div><div><small>Network Load</small><strong id="dashLoad">N/A</strong><span class="positive">Stable traffic</span></div></div>
+        </div>
+        <div class="grid two">
+          <div class="card chart-card">
+            <div class="card-head"><div><h3>Network Traffic</h3><p>Bandwidth utilization — last 60 minutes</p></div><span class="status good">● Healthy</span></div>
+            <canvas id="chart"></canvas>
+          </div>
+          <div class="card">
+            <div class="card-head"><div><h3>Infrastructure Health</h3><p>Current device status</p></div></div>
+            <div class="health" id="dashHealthList"><div><span>▣ CCTV Cameras</span><b>24 / 24</b></div><div><span>⌁ Network Switches</span><b>10 / 11</b></div><div><span>▤ Servers</span><b>6 / 6</b></div><div><span>◈ Access Points</span><b class="amber">4 / 7</b></div></div>
+            <div class="availability"><div><span>Overall availability</span><b>91.7%</b></div><div class="bar"><i style="width:91.7%"></i></div></div>
+          </div>
+        </div>
+        <div class="grid two">
+          <div class="card">
+            <div class="card-head"><div><h3>Recent Alerts</h3><p>Events requiring attention</p></div><button class="link" onclick="openPage('alerts')">View all →</button></div>
+            <div class="alerts" id="dashAlertsList">
+              <div class="alert critical"><i>!</i><div><b>Switch SW-07 unreachable</b><small>Production Block · 8 min ago</small></div><label>Critical</label></div>
+              <div class="alert warning"><i>!</i><div><b>Camera CAM-18 high latency</b><small>Gate-2 · 14 min ago</small></div><label>Warning</label></div>
+              <div class="alert info"><i>i</i><div><b>Server SRV-02 CPU above 80%</b><small>Data Center · 21 min ago</small></div><label>Info</label></div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-head"><div><h3>Quick Access</h3><p>Open monitoring modules</p></div></div>
+            <div class="quick">
+              <button onclick="openPage('cameras')"><strong>▣</strong><b>CCTV Wall</b><small>24 cameras</small></button>
+              <button onclick="openPage('network')"><strong>⌁</strong><b>Network Map</b><small>48 devices</small></button>
+              <button onclick="openPage('servers')"><strong>▤</strong><b>Servers</b><small>6 servers</small></button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- DEVICES -->
+      <section class="page" id="devices">
+        <div class="page-top">
+          <div><span class="crumb">MONITORING</span><h2>Device Inventory</h2><p>Network switches, routers, access points and infrastructure devices.</p></div>
+         <div class="nms-page-actions">
+
+<button
+    type="button"
+    class="btn secondary"
+    id="refreshDevicesBtn"
+    onclick="refreshDevicesFromBackend()"
+>
+    ↻ Refresh
+</button>
+
+    <!-- ADD DEVICE -->
+    <button
+        type="button"
+        class="btn primary"
+        id="addDeviceBtn"
+    >
+        ＋ Add Device
+    </button>
+
+</div>
+        </div>
+        <div class="toolbar"><input id="deviceSearch" placeholder="⌕ Search device, IP or location..." oninput="filterDevices()"><select><option>All Types</option><option>Switch</option><option>Router</option><option>Access Point</option></select><select><option>All Status</option><option>Online</option><option>Offline</option></select></div>
+  <div class="card table-wrap">
+
+    <table>
+
+        <thead>
+
+            <tr>
+
+                <th>DEVICE</th>
+                <th>TYPE</th>
+                <th>IP ADDRESS</th>
+                <th>LOCATION</th>
+                <th>STATUS</th>
+                <th>LATENCY</th>
+                <th>UPTIME</th>
+                <th>LAST CHECK</th>
+
+            </tr>
+
+        </thead>
+
+
+        <tbody id="deviceRows"></tbody>
+
+    </table>
+
+</div>
+
+        <!-- ADD DEVICE MODAL -->
+        <div id="deviceModal" class="nms-modal" aria-hidden="true">
+          <div class="nms-modal-box" role="dialog" aria-modal="true" aria-labelledby="deviceModalTitle">
+            <div class="nms-modal-header">
+              <div><h3 id="deviceModalTitle">Add New Device</h3><p>Register a network device in the inventory.</p></div>
+              <button type="button" class="nms-close-btn" id="closeDeviceModal" aria-label="Close">×</button>
+            </div>
+            <form id="deviceForm" onsubmit="submitNewDevice(event)">
+              <div class="nms-form-grid">
+                <div class="nms-form-group"><label for="newDeviceId">Device ID *</label><input id="newDeviceId" type="text" placeholder="SW-10" required></div>
+                <div class="nms-form-group"><label for="newDeviceName">Device Name *</label><input id="newDeviceName" type="text" placeholder="Office Switch" required></div>
+                <div class="nms-form-group"><label for="newDeviceType">Device Type *</label><select id="newDeviceType" required><option value="Switch">Switch</option><option value="Router">Router</option><option value="Access Point">Access Point</option><option value="Firewall">Firewall</option><option value="Other">Other</option></select></div>
+                <div class="nms-form-group"><label for="newDeviceIp">IP Address *</label><input id="newDeviceIp" type="text" placeholder="10.10.10.10" required></div>
+                <div class="nms-form-group"><label for="newDeviceLocation">Location *</label><input id="newDeviceLocation" type="text" placeholder="Admin Block" required></div>
+                <div class="nms-form-group"><label for="newDeviceStatus">Status</label><select id="newDeviceStatus"><option value="Online">Online</option><option value="Offline">Offline</option></select></div>
+                <div class="nms-form-group"><label for="newDeviceUptime">Uptime</label><input id="newDeviceUptime" type="text" value="100%" placeholder="99.99%"></div>
+              </div>
+              <div class="nms-modal-actions">
+                <button type="button" class="btn secondary" id="cancelDeviceBtn">Cancel</button>
+                <button type="submit" class="btn primary">Save Device</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </section>
+
+      <!-- CAMERAS -->
+      <section class="page" id="cameras">
+        <div class="page-top">
+          <div><span class="crumb">SECURITY</span><h2>CCTV Camera Wall</h2><p>Authorized camera monitoring interface.</p></div>
+      <div class="nms-page-actions">
+
+    <!-- CCTV IP SEARCH -->
+    <div class="cctv-ip-search">
+        <span>⌕</span>
+
+        <input
+            type="text"
+            id="cameraIpSearch"
+            placeholder="Search camera by IP..."
+            autocomplete="off"
+        >
+
+        <button
+            type="button"
+            id="clearCameraSearch"
+            title="Clear search"
+        >
+            ×
+        </button>
+    </div>
+
+    <!-- REAL CCTV PAGE REFRESH -->
+    <button
+        type="button"
+        class="btn secondary"
+        id="refreshCamerasBtn"
+    >
+        ↻ Refresh
+    </button>
+
+    <button
+        type="button"
+        class="btn primary"
+        id="addCameraBtn"
+    >
+        ＋ Add CCTV
+    </button>
+
+</div>
+        </div>
+     
+        <!-- CCTV LIVE SUMMARY -->
+<div class="cctv-summary-grid">
+
+    <div class="cctv-stat-card total">
+        <span>Total Cameras</span>
+        <strong id="cctvTotalCount">0</strong>
+        <small>Registered cameras</small>
+    </div>
+
+    <div class="cctv-stat-card online">
+        <span>Online</span>
+        <strong id="cctvOnlineCount">0</strong>
+        <small>Currently online</small>
+    </div>
+
+    <div class="cctv-stat-card offline">
+        <span>Offline</span>
+        <strong id="cctvOfflineCount">0</strong>
+        <small>Not responding</small>
+    </div>
+
+    <div class="cctv-stat-card issues">
+        <span>Issues</span>
+        <strong id="cctvIssueCount">0</strong>
+        <small>Requires attention</small>
+    </div>
+
+</div>
+
+<!-- CCTV AVAILABILITY -->
+<div class="cctv-health-panel">
+
+    <div class="cctv-health-header">
+        <div>
+            <h3>Camera Infrastructure Health</h3>
+            <p>Real-time CCTV monitoring status</p>
+        </div>
+
+        <strong id="cctvAvailability">0%</strong>
+    </div>
+
+    <div class="cctv-health-bar">
+        <i id="cctvAvailabilityBar" style="width:0%"></i>
+    </div>
+
+    <div class="cctv-health-details">
+        <span>
+            <i class="cctv-dot online"></i>
+            Online
+        </span>
+
+        <span>
+            <i class="cctv-dot offline"></i>
+            Offline
+        </span>
+
+        <span>
+            <i class="cctv-dot unknown"></i>
+            Unknown
+        </span>
+    </div>
+
+</div>  
+
+
+        <div class="camera-grid" id="cameraGrid"></div>
+
+        <!-- ADD CCTV MODAL -->
+        <div id="cameraModal" class="nms-modal" aria-hidden="true">
+          <div class="nms-modal-box" role="dialog" aria-modal="true" aria-labelledby="cameraModalTitle">
+            <div class="nms-modal-header">
+              <div><h3 id="cameraModalTitle">Add New CCTV Camera</h3><p>Register a new camera in the CCTV wall.</p></div>
+              <button type="button" class="nms-close-btn" id="closeCameraModal" aria-label="Close">×</button>
+            </div>
+            <form id="cameraForm">
+              <div class="nms-form-grid">
+                <div class="nms-form-group"><label for="newCameraId">Camera ID *</label><input id="newCameraId" type="text" placeholder="CAM-17" required></div>
+                <div class="nms-form-group"><label for="newCameraName">Camera Name *</label><input id="newCameraName" type="text" placeholder="Main Gate" required></div>
+                <div class="nms-form-group"><label for="newCameraIp">IP Address *</label><input id="newCameraIp" type="text" placeholder="192.168.1.117" required></div>
+                <div class="nms-form-group"><label for="newCameraLocation">Location *</label><input id="newCameraLocation" type="text" placeholder="Main Gate" required></div>
+                <div class="nms-form-group"><label for="newCameraStatus">Status</label><select id="newCameraStatus"><option value="LIVE">LIVE</option><option value="OFFLINE">OFFLINE</option></select></div>
+              </div>
+              <div class="nms-modal-actions">
+                <button type="button" class="btn secondary" id="cancelCameraBtn">Cancel</button>
+                <button type="submit" class="btn primary">Save CCTV</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </section>
+
+      <!-- DESKTOP MANAGEMENT -->
+      <section class="page" id="desktops">
+        <div class="desktop-page-actions">
+    
+<!-- =========================================
+     ADD DESKTOP MODAL
+========================================= -->
+
+<div id="desktopModal" class="desktop-modal">
+
+    <div class="desktop-modal-box">
+
+        <div class="desktop-modal-header">
+
+            <div>
+                <h2>Add New Desktop</h2>
+                <p>Register a new company desktop</p>
+            </div>
+
+            <button
+                type="button"
+                class="desktop-close-btn"
+                id="closeDesktopModal">
+                ×
+            </button>
+    
+        </div>
+
+
+        <form id="desktopForm">
+
+            <div class="desktop-form-grid">
+
+                <div class="desktop-form-group">
+
+                    <label>Desktop ID</label>
+
+                    <input
+                        type="text"
+                        id="desktopId"
+                        placeholder="NM-DESK-004"
+                        required>
+
+                </div>
+
+
+                <div class="desktop-form-group">
+
+                    <label>Department</label>
+
+                    <input
+                        type="text"
+                        id="desktopDepartment"
+                        placeholder="IT Department"
+                        required>
+
+                </div>
+
+                <div class="desktop-form-group">
+
+    <label>Location</label>
+
+    <input
+        type="text"
+        id="desktopLocation"
+        placeholder="GATE / ADMIN / PLANT-1"
+        required>
+
+</div>
+
+                <div class="desktop-form-group">
+
+                    <label>IP Address</label>
+
+                    <input
+                        type="text"
+                        id="desktopIP"
+                        placeholder="192.168.1.24"
+                        required>
+
+                </div>
+
+
+                <div class="desktop-form-group">
+
+                    <label>Operating System</label>
+
+                    <select id="desktopOS">
+
+                        <option value="Windows 11">
+                            Windows 11
+                        </option>
+
+                        <option value="Windows 10">
+                            Windows 10
+                        </option>
+
+                        <option value="Linux">
+                            Linux
+                        </option>
+
+                    </select>
+
+                </div>
+
+
+                <div class="desktop-form-group">
+
+                    <label>CPU Usage (%)</label>
+
+                    <input
+                        type="number"
+                        id="desktopCPU"
+                        min="0"
+                        max="100"
+                        value="0">
+
+                </div>
+
+
+                <div class="desktop-form-group">
+
+                    <label>RAM Usage (%)</label>
+
+                    <input
+                        type="number"
+                        id="desktopRAM"
+                        min="0"
+                        max="100"
+                        value="0">
+
+                </div>
+
+
+                <div class="desktop-form-group">
+
+                    <label>Status</label>
+
+                    <select id="desktopStatus">
+
+                        <option value="Online">
+                            Online
+                        </option>
+
+                        <option value="Offline">
+                            Offline
+                        </option>
+
+                    </select>
+
+                </div>
+
+            </div>
+
+
+            <div class="desktop-form-actions">
+
+                <button
+                    type="button"
+                    class="desktop-cancel-btn"
+                    id="cancelDesktopBtn">
+                    Cancel
+                </button>
+
+                <button
+                    type="submit"
+                    class="desktop-save-btn">
+                    Save Desktop
+                </button>
+
+            </div>
+
+        </form>
+
+    </div>
+
+</div>
+
+<!-- =========================================
+     DESKTOP LOCATION MONITOR MODAL
+========================================= -->
+
+<div id="desktopLocationModal" class="desktop-modal">
+
+    <div class="desktop-modal-box">
+
+        <div class="desktop-modal-header">
+
+            <div>
+                <h2>Monitor Desktop Location</h2>
+                <p>Select a location for live desktop monitoring</p>
+            </div>
+
+            <button
+                type="button"
+                class="desktop-close-btn"
+                id="closeDesktopLocationModal">
+                ×
+            </button>
+
+        </div>
+
+        <div class="desktop-form-group">
+
+            <label>Search / Select Location</label>
+
+            <input
+                type="text"
+                id="desktopLocationSearch"
+                placeholder="Type location..."
+                autocomplete="off">
+
+        </div>
+
+        <div
+            id="desktopLocationList"
+            style="
+                margin-top:15px;
+                max-height:220px;
+                overflow-y:auto;
+            ">
+        </div>
+
+
+<!-- DESKTOP MONITORING CONTROL -->
+<div style="
+    margin-top:18px;
+    padding:15px;
+    border:1px solid #23384d;
+    border-radius:10px;
+    background:#101f2e;
+">
+
+    <div style="
+        display:flex;
+        justify-content:space-between;
+        align-items:center;
+        gap:15px;
+    ">
+
+        <div>
+            <strong style="color:#eaf4ff;">
+                Desktop Monitoring
+            </strong>
+
+            <div style="
+                margin-top:5px;
+                font-size:13px;
+                color:#71859a;
+            ">
+                Turn OFF to stop all desktop monitoring and ping.
+            </div>
+        </div>
+
+        <label style="
+            position:relative;
+            width:52px;
+            height:28px;
+            display:inline-block;
+        ">
+
+            <input
+                type="checkbox"
+                id="desktopMonitoringToggle"
+                checked
+                style="
+                    opacity:0;
+                    width:0;
+                    height:0;
+                "
+            >
+
+            <span id="desktopMonitoringSwitch" style="
+                position:absolute;
+                cursor:pointer;
+                inset:0;
+                background:#2588d8;
+                border-radius:30px;
+                transition:.25s;
+            "></span>
+
+        </label>
+
+    </div>
+
+    <div id="desktopMonitoringStatus" style="
+        margin-top:10px;
+        font-size:13px;
+        font-weight:600;
+        color:#39d98a;
+    ">
+        ● Monitoring ON
+    </div>
+
+</div>
+
+
+        <div class="desktop-form-actions">
+
+            <button
+                type="button"
+                class="desktop-cancel-btn"
+                id="cancelDesktopLocationBtn">
+                Cancel
+            </button>
+
+            <button
+                type="button"
+                class="desktop-save-btn"
+                id="applyDesktopLocationBtn">
+                Apply Location
+            </button>
+
+        </div>
+
+    </div>
+
+</div>
+
+<!-- =========================================
+     VIEW DESKTOP MODAL
+========================================= -->
+
+<div id="desktopViewModal" class="desktop-modal">
+
+    <div class="desktop-modal-box view-box">
+
+        <div class="desktop-modal-header">
+
+            <div>
+                <h2>Desktop Details</h2>
+                <p>System information</p>
+            </div>
+
+            <button
+                type="button"
+                class="desktop-close-btn"
+                onclick="closeDesktopView()">
+                ×
+            </button>
+
+        </div>
+
+
+        <div id="desktopDetails"></div>
+
+    </div>
+
+</div>
+    <div class="page-header">
+        <div>
+            <h1>Desktop Management</h1>
+            <p>Monitor and manage company desktop systems</p>
+        </div>
+<div style="display:flex; gap:10px; align-items:center;"></div>
+
+<button
+    type="button"
+    class="primary-btn desktop-location-btn"
+    id="desktopLocationBtn"
+    onclick="
+        const modal = document.getElementById('desktopLocationModal');
+        if (modal) {
+            modal.classList.add('show');
+        }
+        if (typeof renderDesktopLocationOptions === 'function') {
+            renderDesktopLocationOptions();
+        }
+    ">
+    📍 Monitor Location
+</button>
+
+    <button type="button" class="desktop-refresh-btn" id="desktopRefreshBtn">
+        🔄 Refresh
+    </button>
+</div>
+
+        <button class="primary-btn" id="addDesktopBtn">
+            + Add Desktop
+</button>
+    </div>
+
+
+    <!-- Desktop Summary -->
+
+    <div class="stats-grid">
+
+        <div class="stat-card">
+            <span>Total Desktops</span>
+            <strong>32</strong>
+            <small>Registered systems</small>
+        </div>
+
+        <div class="stat-card">
+            <span>Online</span>
+            <strong class="text-green">28</strong>
+            <small>Currently online</small>
+        </div>
+
+        <div class="stat-card">
+            <span>Offline</span>
+            <strong class="text-red">4</strong>
+            <small>Not responding</small>
+        </div>
+
+        <div class="stat-card">
+            <span>Issues</span>
+            <strong class="text-amber">3</strong>
+            <small>Requires attention</small>
+        </div>
+
+    </div>
+
+
+    <!-- Desktop List -->
+
+    <div class="panel">
+
+        <div class="panel-header">
+
+            <div>
+                <h3>Desktop Inventory</h3>
+                <p>All registered desktop systems</p>
+            </div>
+
+            <input
+                type="search"
+                class="table-search"
+                placeholder="Search desktop..."
+            >
+
+        </div>
+
+
+        <div class="table-wrapper">
+
+            <table>
+
+                <thead>
+                    <tr>
+                        <th>Desktop ID</th>
+                        <th>Department</th>
+                        <th>IP Address</th>
+                        <th>Operating System</th>
+                        <th>CPU</th>
+                        <th>RAM</th>
+                        <th>Status</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+
+                <tbody>
+
+                    <tr>
+                        <td><strong>NM-DESK-001</strong></td>
+                        <td>Admin</td>
+                        <td>192.168.1.21</td>
+                        <td>Windows 11</td>
+                        <td>18%</td>
+                        <td>54%</td>
+                        <td>
+                            <span class="status-badge online">
+                                ● Online
+                            </span>
+                        </td>
+                        <td>
+                            <button type="button" class="table-action" onclick="viewDesktop('NM-DESK-001')">
+                                View
+                            </button>
+                        </td>
+                    </tr>
+
+
+                    <tr>
+                        <td><strong>NM-DESK-002</strong></td>
+                        <td>Accounts</td>
+                        <td>192.168.1.22</td>
+                        <td>Windows 11</td>
+                        <td>42%</td>
+                        <td>71%</td>
+                        <td>
+                            <span class="status-badge online">
+                                ● Online
+                            </span>
+                        </td>
+                        <td>
+                            <button type="button" class="table-action" onclick="viewDesktop('NM-DESK-002')">
+                                View
+                            </button>
+                        </td>
+                    </tr>
+
+
+                    <tr>
+                        <td><strong>NM-DESK-003</strong></td>
+                        <td>HR</td>
+                        <td>192.168.1.23</td>
+                        <td>Windows 10</td>
+                        <td>—</td>
+                        <td>—</td>
+                        <td>
+                            <span class="status-badge offline">
+                                ● Offline
+                            </span>
+                        </td>
+                        <td>
+                            <button type="button" class="table-action" onclick="viewDesktop('NM-DESK-003')">
+                                View
+                            </button>
+                        </td>
+                    </tr>
+</tbody>
+
+            </table>
+
+        </div>
+
+    </div>
+
+</section>
+
+      <!-- NETWORK -->
+      <section class="page" id="network">
+        <div class="page-top"><div><span class="crumb">NETWORK</span><h2>Live Network Map</h2><p>Logical topology and reachability overview.</p></div><button class="btn primary" onclick="pingTest()">⌁ Run Ping Test</button></div>
+        <div class="card topology">
+          <div class="topo-node core"><b>CORE-RTR-01</b><small>10.10.0.1</small><span class="status online">● ONLINE · 1ms</span></div>
+          <div class="line l1"></div><div class="line l2"></div><div class="line l3"></div>
+          <div class="topo-node n1"><b>SW-01</b><small>Data Center</small><span class="status online">● ONLINE</span></div>
+          <div class="topo-node n2"><b>SW-04</b><small>Admin Block</small><span class="status online">● ONLINE</span></div>
+          <div class="topo-node n3"><b>SW-07</b><small>Production Block</small><span class="status offline">● OFFLINE</span></div>
+          <div class="map-legend"><span><i class="dot green"></i>Online</span><span><i class="dot red"></i>Offline</span><span><i class="dot blue"></i>Core</span></div>
+        </div>
+      </section>
+
+      <!-- SERVERS -->
+      <section class="page" id="servers">
+        <div class="page-top"><div><span class="crumb">INFRASTRUCTURE</span><h2>Server Monitoring</h2><p>CPU, memory, disk and service health.</p></div></div>
+        <div class="server-grid" id="serverGrid"></div>
+      </section>
+
+      <!-- ALERTS -->
+      <section class="page" id="alerts">
+        <div class="page-top"><div><span class="crumb">OPERATIONS</span><h2>Alerts & Incidents</h2><p>Monitor and acknowledge infrastructure events.</p></div><button class="btn secondary" onclick="ackAlerts()">✓ Acknowledge All</button></div>
+        <div class="card incident-list">
+          <div class="incident critical-border"><div class="severity critical-bg">CRITICAL</div><div><h3>SW-07 is unreachable</h3><p>Production Block · Detected 8 minutes ago · Last response 10:42:11</p></div><button class="btn secondary" onclick="toast('Incident assigned to Network Team')">Assign</button></div>
+          <div class="incident warning-border"><div class="severity warning-bg">WARNING</div><div><h3>CAM-18 high latency</h3><p>Gate-2 · Average response 640ms · Detected 14 minutes ago</p></div><button class="btn secondary" onclick="toast('Camera diagnostic started')">Diagnose</button></div>
+          <div class="incident info-border"><div class="severity info-bg">INFO</div><div><h3>SRV-02 CPU utilization above 80%</h3><p>Data Center · Current utilization 82% · Detected 21 minutes ago</p></div><button class="btn secondary" onclick="toast('Server details opened')">Details</button></div>
+        </div>
+      </section>
+
+      <!-- LOGS -->
+
+      <!-- REPORTS -->
+      <section class="page" id="reports">
+
+    <div class="reports-page">
+
+        <!-- HEADER -->
+
+        <div class="reports-header">
+
+            <div>
+                <h1>Reports & Analytics</h1>
+
+                <p>
+                    Generate and download network monitoring reports
+                </p>
+            </div>
+
+            <button type="button"
+                class="reports-generate-btn"
+                id="generateReportBtn">
+
+                ↻ Generate Report
+
+            </button>
+<button type="button"
+        class="clear-report-btn"
+        id="clearReportHistory">
+    🗑️ Clear Reports History
+</button>
+
+        </div>
+
+
+        <!-- FILTER -->
+
+        <div class="reports-filter">
+
+            <div class="report-date-group">
+
+                <label>From Date</label>
+
+                <input
+                    type="date"
+                    id="reportFromDate">
+
+            </div>
+
+
+            <div class="report-date-group">
+
+                <label>To Date</label>
+
+                <input
+                    type="date"
+                    id="reportToDate">
+
+            </div>
+
+
+            <div class="report-filter-status" id="reportStatus">
+
+                <span id="reportStatusText">Ready to generate report</span>
+
+            </div>
+
+        </div>
+
+
+        <!-- SUMMARY -->
+
+        <div class="report-summary-grid">
+
+            <div class="report-card">
+
+                <div class="report-card-icon blue">
+                    🖥
+                </div>
+
+                <div>
+                    <span>Total Devices</span>
+                    <strong id="reportTotalDevices">48</strong>
+                    <small>Monitored devices</small>
+                </div>
+
+            </div>
+
+
+            <div class="report-card">
+
+                <div class="report-card-icon green">
+                    ✓
+                </div>
+
+                <div>
+                    <span>Online Devices</span>
+                    <strong id="reportOnlineDevices">44</strong>
+                    <small>Currently online</small>
+                </div>
+
+            </div>
+
+
+            <div class="report-card">
+
+                <div class="report-card-icon red">
+                    !
+                </div>
+
+                <div>
+                    <span>Active Alerts</span>
+                    <strong id="reportActiveAlerts">3</strong>
+                    <small>Requires attention</small>
+                </div>
+
+            </div>
+
+
+            <div class="report-card">
+
+                <div class="report-card-icon purple">
+                    %
+                </div>
+
+                <div>
+                    <span>Network Uptime</span>
+                    <strong id="reportUptime">99.7%</strong>
+                    <small>Selected period</small>
+                </div>
+
+            </div>
+
+        </div>
+
+
+        <!-- DOWNLOAD AREA -->
+
+        <div class="reports-download-panel">
+
+            <div>
+
+                <h3>Download Report</h3>
+
+                <p>
+                    Export the selected monitoring data
+                    for further analysis.
+                </p>
+
+            </div>
+
+
+            <div class="report-download-buttons">
+
+                <button
+                    class="report-csv-btn"
+                    id="downloadCSV">
+
+                    ↓ CSV
+
+                </button>
+
+
+                <button
+                    class="report-excel-btn"
+                    id="downloadExcel">
+
+                    ↓ Excel
+
+                </button>
+
+            </div>
+
+        </div>
+
+
+        <!-- NETWORK REPORT TABLE -->
+
+        <div class="reports-table-panel">
+
+            <div class="reports-table-header">
+
+                <div>
+
+                    <h3>Network Monitoring Report</h3>
+
+                    <p>
+                        Device availability and network status
+                    </p>
+
+                </div>
+
+                <span id="reportRecordCount">
+                    0 Records
+                </span>
+
+            </div>
+
+
+            <div class="reports-table-wrapper">
+
+                <table
+                    class="reports-table"
+                    id="networkReportTable">
+
+                    <thead>
+
+                        <tr>
+
+                            <th>Device ID</th>
+                            <th>Device Name</th>
+                            <th>Type</th>
+                            <th>IP Address</th>
+                            <th>Status</th>
+                            <th>Uptime</th>
+                            <th>Last Check</th>
+
+                        </tr>
+
+                    </thead>
+
+
+                    <tbody id="reportTableBody">
+
+                        <!-- JavaScript will load data -->
+
+                    </tbody>
+
+                </table>
+
+            </div>
+
+        </div>
+
+    </div>
+
+</section>
+
+      <!-- SETTINGS -->
+      <section class="page" id="settings">
+      <div class="settings-container">
+
+    <div class="settings-header">
+    
+        <div>
+            <h1>⚙ Settings</h1>
+            <p>Configure your Network Monitoring System</p>
+        </div>
+
+        <button class="back-btn" onclick="goDashboard()">
+            ← Dashboard
+        </button>
+    </div>
+
+
+    <!-- GENERAL SETTINGS -->
+    <div class="settings-card">
+
+        <h2>🌐 General Settings</h2>
+
+        <div class="settings-grid">
+
+            <div class="setting-item">
+                <label>Theme</label>
+                <select id="theme">
+                    <option value="dark">Dark</option>
+                    <option value="light">Light</option>
+                </select>
+            </div>
+
+
+            <div class="setting-item">
+                <label>Language</label>
+                <select id="language">
+                    <option value="english">English</option>
+                    <option value="bengali">Bengali</option>
+                    <option value="hindi">Hindi</option>
+                </select>
+            </div>
+
+
+            <div class="setting-item">
+                <label>Timezone</label>
+                <select id="timezone">
+
+                    <option value="Asia/Kolkata">
+                        India (GMT +5:30)
+                    </option>
+
+                    <option value="UTC">
+                        UTC
+                    </option>
+
+                    <option value="Asia/Dhaka">
+                        Bangladesh (GMT +6)
+                    </option>
+
+                    <option value="Asia/Dubai">
+                        Dubai (GMT +4)
+                    </option>
+
+                    <option value="Europe/London">
+                        London
+                    </option>
+
+                    <option value="America/New_York">
+                        New York
+                    </option>
+
+                </select>
+            </div>
+
+
+            <div class="setting-item">
+
+                <label>Dashboard Refresh</label>
+
+                <select id="dashboardRefresh">
+
+                    <option value="5">5 Seconds</option>
+                    <option value="10">10 Seconds</option>
+                    <option value="30">30 Seconds</option>
+                    <option value="60">1 Minute</option>
+                    <option value="300">5 Minutes</option>
+
+                </select>
+
+            </div>
+
+        </div>
+
+    </div>
+
+
+
+    <!-- NETWORK MONITORING -->
+    <div class="settings-card">
+
+        <h2>🌐 Network Monitoring</h2>
+
+        <div class="setting-row">
+
+            <div>
+                <strong>Network Monitoring</strong>
+                <p>Enable or disable network monitoring</p>
+            </div>
+
+            <label class="switch">
+                <input type="checkbox" id="networkMonitoring">
+                <span class="slider"></span>
+            </label>
+
+        </div>
+
+
+        <div class="setting-item">
+
+            <label>Network Check Interval</label>
+
+            <select id="networkInterval">
+
+                <option value="5">5 Seconds</option>
+                <option value="10">10 Seconds</option>
+                <option value="30">30 Seconds</option>
+                <option value="60">1 Minute</option>
+                <option value="300">5 Minutes</option>
+                
+            </select>
+
+        </div>
+
+    </div>
+
+
+
+    <!-- CAMERA MONITORING -->
+    <div class="settings-card">
+
+        <h2>📷 Camera Monitoring</h2>
+
+        <div class="setting-row">
+
+            <div>
+                <strong>Camera Monitoring</strong>
+                <p>Enable or disable camera monitoring</p>
+            </div>
+
+            <label class="switch">
+
+                <input type="checkbox" id="cameraMonitoring">
+
+                <span class="slider"></span>
+
+            </label>
+
+        </div>
+
+
+        <div class="setting-item">
+
+            <label>Camera Check Interval</label>
+
+            <select id="cameraInterval">
+
+                <option value="5">5 Seconds</option>
+                <option value="10">10 Seconds</option>
+                <option value="30">30 Seconds</option>
+                <option value="60">1 Minute</option>
+                <option value="300">5 Minutes</option>
+<option value="1800">30 Minutes</option>
+            </select>
+
+        </div>
+
+    </div>
+
+
+    <div class="setting-item">
+
+    <label>Offline Camera Retry Interval</label>
+
+    <select id="cameraRetryInterval">
+
+        <option value="30">30 Seconds</option>
+        <option value="60">1 Minute</option>
+        <option value="120" selected>2 Minutes</option>
+        <option value="300">5 Minutes</option>
+        <option value="600">10 Minutes</option>
+
+    </select>
+
+</div>
+
+
+    <!-- ALERT SETTINGS -->
+    <div class="settings-card">
+
+        <h2>🚨 Alert & Recovery</h2>
+
+
+        <div class="setting-row">
+
+            <div>
+                <strong>Alert</strong>
+                <p>Enable system alerts</p>
+            </div>
+
+            <label class="switch">
+
+                <input type="checkbox" id="alert">
+
+                <span class="slider"></span>
+
+            </label>
+
+        </div>
+
+
+
+        <div class="setting-row">
+
+            <div>
+                <strong>Auto Recovery</strong>
+                <p>Automatically recover failed services</p>
+            </div>
+
+            <label class="switch">
+
+                <input type="checkbox" id="autoRecovery">
+
+                <span class="slider"></span>
+
+            </label>
+
+        </div>
+
+
+
+        <div class="setting-row">
+
+            <div>
+                <strong>Auto Restart</strong>
+                <p>Automatically restart failed services</p>
+            </div>
+
+            <label class="switch">
+
+                <input type="checkbox" id="autoRestart">
+
+                <span class="slider"></span>
+
+            </label>
+
+        </div>
+
+    </div>
+
+
+
+    <!-- NOTIFICATION -->
+    <div class="settings-card">
+
+        <h2>📧 Notification Settings</h2>
+
+
+        <div class="setting-row">
+
+            <div>
+                <strong>Email Notification</strong>
+                <p>Send alerts through email</p>
+            </div>
+
+            <label class="switch">
+
+                <input type="checkbox" id="emailNotification">
+
+                <span class="slider"></span>
+
+            </label>
+
+        </div>
+
+
+
+        <div class="setting-row">
+
+            <div>
+                <strong>🔊 Sound Notification</strong>
+                <p>Play sound when an alert occurs</p>
+            </div>
+
+            <label class="switch">
+
+                <input type="checkbox" id="soundNotification">
+
+                <span class="slider"></span>
+
+            </label>
+
+        </div>
+
+    </div>
+
+
+
+    <!-- BACKUP -->
+    <div class="settings-card">
+
+        <h2>💾 Backup & Cleanup</h2>
+
+
+        <div class="setting-row">
+
+            <div>
+                <strong>Automatic Backup</strong>
+                <p>Automatically backup system data</p>
+            </div>
+
+            <label class="switch">
+
+                <input type="checkbox" id="automaticBackup">
+
+                <span class="slider"></span>
+
+            </label>
+
+        </div>
+
+
+
+        <div class="setting-row">
+
+            <div>
+                <strong>Auto Cleanup</strong>
+                <p>Automatically remove old data</p>
+            </div>
+
+            <label class="switch">
+
+                <input type="checkbox" id="autoCleanup">
+
+                <span class="slider"></span>
+
+            </label>
+
+        </div>
+
+
+
+        <div class="settings-grid">
+
+            <div class="setting-item">
+
+                <label>History Retention</label>
+
+                <select id="historyRetention">
+
+                    <option value="7">7 Days</option>
+                    <option value="30">30 Days</option>
+                    <option value="90">90 Days</option>
+                    <option value="180">180 Days</option>
+                    <option value="365">1 Year</option>
+
+                </select>
+
+            </div>
+
+
+
+            <div class="setting-item">
+
+                <label>Backup Retention</label>
+
+                <select id="backupRetention">
+
+                    <option value="7">7 Days</option>
+                    <option value="30">30 Days</option>
+                    <option value="90">90 Days</option>
+                    <option value="180">180 Days</option>
+                    <option value="365">1 Year</option>
+
+                </select>
+
+            </div>
+
+        </div>
+
+    </div>
+
+
+
+    <!-- BUTTONS -->
+    <div class="settings-actions">
+
+        <button type="button" id="resetSettingsBtn" class="reset-btn" onclick="resetSettings()">
+            Reset
+        </button>
+
+        <button type="button" id="saveSettingsBtn" class="save-btn" onclick="saveSettings()">
+            💾 Save Settings
+        </button>
+
+    </div>
+
+
+    <div id="saveMessage" class="save-message"></div>
+
+</div>
+
+    </section>
+
+    </div>
+
+<div id="toast"></div>
+
+<script>
+(async function checkAuthentication() {
+
+    const token = localStorage.getItem("access_token");
+
+    // Token না থাকলে Login page-এ পাঠাবে
+    if (!token) {
+        window.location.replace("login.html");
+        return;
+    }
+
+    try {
+
+        const response = await fetch(
+            "http://192.168.115.79:8000/api/auth/me",
+            {
+                method: "GET",
+                headers: {
+                    "Authorization": "Bearer " + token
+                }
+            }
+        );
+
+        // Token invalid / expired হলে
+        if (!response.ok) {
+            throw new Error("Authentication failed");
+        }
+
+        const data = await response.json();
+
+        // Backend থেকে valid admin না এলে
+        if (!data.success || !data.admin) {
+            throw new Error("Invalid authentication");
+        }
+
+        // সর্বশেষ admin information save
+        localStorage.setItem("admin_id", data.admin.id);
+        localStorage.setItem("admin_name", data.admin.name);
+        localStorage.setItem("admin_email", data.admin.email);
+        localStorage.setItem("admin_phone", data.admin.phone || "");
+        localStorage.setItem("admin_department", data.admin.department || "");
+        localStorage.setItem("admin_location", data.admin.location || "");
+
+        console.log("✅ NMS authentication verified.");
+
+    } catch (error) {
+
+        console.error("Authentication error:", error);
+
+        // পুরনো login information remove
+        localStorage.removeItem("access_token");
+        localStorage.removeItem("adminLoggedIn");
+        localStorage.removeItem("loggedIn");
+
+        // Login page-এ ফেরত পাঠাবে
+        window.location.replace("login.html");
+    }
+
+})();
+</script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="script_v2.js"></script>
+
+</body>
+</html>
