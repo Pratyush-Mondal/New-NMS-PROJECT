@@ -18,7 +18,7 @@
     try {
 
         const response = await fetch(
-            "http://192.168.115.79:8000/api/auth/me",
+            "http://127.0.0.1:8000/api/auth/me",
             {
                 method: "GET",
                 headers: {
@@ -74,14 +74,13 @@
       <a href="#devices" class="nav" data-page="devices"><span>◈</span>Devices <em>48</em></a>
       <a href="#cameras" class="nav" data-page="cameras"><span>▣</span>CCTV Cameras <em>24</em></a>
       <!-- ADD THIS -->
-<a href="#network" class="nav" data-page="network">
-    <span>⌁</span>Network Map </a>
-   <a href="#desktops" class="nav" data-page="desktops">
-    <span>🖥️</span>Desktop Management
-</a>
+      <a href="#network" class="nav" data-page="network">
+          <span>⌁</span>Network Map </a>
+         <a href="#desktops" class="nav" data-page="desktops">
+          <span>🖥️</span>Desktop Management
+      </a>
       <div class="nav-title">OPERATIONS</div>
       <a href="#alerts" class="nav" data-page="alerts"><span>⚠</span>Alerts <em class="danger-badge">3</em></a>
-    
        <a href="#reports" class="nav" data-page="reports"><span>▥</span>Reports</a>
       <div class="nav-title">SYSTEM</div>
       <a href="#settings" class="nav" data-page="settings"><span>⚙</span>Settings</a>
@@ -585,7 +584,6 @@
             <div class="quick">
               <button onclick="openPage('cameras')"><strong>▣</strong><b>CCTV Wall</b><small>24 cameras</small></button>
               <button onclick="openPage('network')"><strong>⌁</strong><b>Network Map</b><small>48 devices</small></button>
-              <button onclick="openPage('servers')"><strong>▤</strong><b>Servers</b><small>6 servers</small></button>
             </div>
           </div>
         </div>
@@ -1344,10 +1342,7 @@
       </section>
 
       <!-- SERVERS -->
-      <section class="page" id="servers">
-        <div class="page-top"><div><span class="crumb">INFRASTRUCTURE</span><h2>Server Monitoring</h2><p>CPU, memory, disk and service health.</p></div></div>
-        <div class="server-grid" id="serverGrid"></div>
-      </section>
+
 
       <!-- ALERTS -->
       <section class="page" id="alerts">
@@ -1359,7 +1354,7 @@
         </div>
       </section>
 
-      <!-- LOGS -->
+      <!-- LOGS REMOVED -->
 
       <!-- REPORTS -->
       <section class="page" id="reports">
@@ -2028,7 +2023,7 @@
     try {
 
         const response = await fetch(
-            "http://192.168.115.79:8000/api/auth/me",
+            "http://127.0.0.1:8000/api/auth/me",
             {
                 method: "GET",
                 headers: {

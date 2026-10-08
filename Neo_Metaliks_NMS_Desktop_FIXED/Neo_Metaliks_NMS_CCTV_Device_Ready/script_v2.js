@@ -7,9 +7,7 @@ const pageHeadings = {
     cameras: 'CCTV Camera Wall',
     desktops: 'Desktop Management',
     network: 'Live Network Map',
-    servers: 'Server Monitoring',
     alerts: 'Alerts & Incidents',
-    logs: 'Live System Logs',
     reports: 'Reports & Analytics',
     settings: 'NMS Settings',
     'admin-profile-page': 'Administrator Profile'
@@ -148,7 +146,7 @@ async function loadDevicesFromBackend() {
     try {
 
         const response = await fetch(
-            "http://192.168.115.79:8000/api/devices",
+            "http://127.0.0.1:8000/api/devices",
             {
                 method: "GET",
 
@@ -559,23 +557,7 @@ const camNames=['Main Gate','Gate-2','Main Yard','Production Line-1','Production
 document.getElementById('cameraGrid').innerHTML=camNames.map((name,i)=>`<div class="camera ${i===10?'offline':''}"><div class="camera-feed">${i===10?'▧':'◉'}</div><div class="camera-info"><span>CAM-${String(i+1).padStart(2,'0')} · ${name}</span><span>${i===10?'OFFLINE':'LIVE'}</span></div></div>`).join('');
 function setCameraGrid(n){toast('Camera layout set to '+n+' × '+n)}
 
-const servers=[
-['SRV-01','Application Server',34,61],['SRV-02','Database Server',82,73],['SRV-03','File Server',27,68],['SRV-04','Backup Server',18,42],['SRV-05','Monitoring Server',31,55],['SRV-06','Web Server',46,39]
-];
-document.getElementById('serverGrid').innerHTML=servers.map(s=>`<div class="card server"><div class="server-head"><b>${s[0]}</b><span class="status online">ONLINE</span></div><p>${s[1]}</p><div class="metric"><span>CPU Usage</span><b>${s[2]}%</b></div><div class="metric-bar ${s[2]>80?'warn':''}"><i style="width:${s[2]}%"></i></div><div class="metric"><span>Memory</span><b>${s[3]}%</b></div><div class="metric-bar"><i style="width:${s[3]}%"></i></div></div>`).join('');
 
-const logData=[
-['10:48:32','INFO','SNMP poll completed for SW-01'],
-['10:48:25','INFO','CAM-04 heartbeat received'],
-['10:48:11','WARN','SRV-02 CPU utilization 82%'],
-['10:47:59','INFO','Administrator opened Network Map'],
-['10:47:42','WARN','CAM-18 response latency 640ms'],
-['10:47:31','CRIT','SW-07 ICMP request timed out'],
-['10:46:58','INFO','NMS database backup completed'],
-['10:46:41','INFO','24 camera streams verified']
-];
-function renderLogs(){document.getElementById('logBox').innerHTML=logData.map(x=>`<div class="log-line">[${x[0]}] <b class="${x[1].toLowerCase()}">${x[1]}</b>${x[2]}</div>`).join('')}
-renderLogs();function clearLogs(){document.getElementById('logBox').innerHTML='<div class="log-line">Live log view cleared. Waiting for new events...</div>';toast('Log view cleared')}
 
 function drawChart(){
  const c=document.getElementById('chart');if(!c)return;
@@ -699,8 +681,7 @@ function openAdminSettings() {
 
 function showAdminActivity() {
     closeAdminMenu();
-    if (typeof openPage === 'function') openPage('logs');
-    showToast('Activity Log opened');
+    showToast('Activity Log feature removed');
 }
 
 function updateAdminProfileUI(name, email, phone, department, location) {
@@ -753,7 +734,7 @@ async function loadAdminProfileData() {
     try {
 
         const response = await fetch(
-            "http://192.168.115.79:8000/api/auth/me",
+            "http://127.0.0.1:8000/api/auth/me",
             {
                 method: "GET",
                 headers: {
@@ -887,7 +868,7 @@ function bindAdminProfileForm() {
             }
 
             const response = await fetch(
-                "http://192.168.115.79:8000/api/auth/profile",
+                "http://127.0.0.1:8000/api/auth/profile",
                 {
                     method: "PUT",
 
@@ -1052,7 +1033,7 @@ window.cancelProfileEdit = cancelProfileEdit;
 const profileImageInput =
     document.getElementById("profileImageInput");
 
-const API_BASE_URL = "http://192.168.115.79:8000";
+const API_BASE_URL = "http://127.0.0.1:8000";
 
 
 function setProfileImage(imageUrl) {
@@ -1498,7 +1479,7 @@ cameraRetryInterval:
     try {
 
         const cameraResponse = await fetch(
-            "http://192.168.115.79:8000/api/settings/camera",
+            "http://127.0.0.1:8000/api/settings/camera",
             {
                 method: "PUT",
                 headers: {
@@ -1598,7 +1579,7 @@ async function loadCameraSettingsFromBackend() {
     try {
 
         const response = await fetch(
-            "http://192.168.115.79:8000/api/settings/camera",
+            "http://127.0.0.1:8000/api/settings/camera",
             {
                 method: "GET",
                 headers: {
@@ -2089,7 +2070,7 @@ async function syncNetworkSettingsToBackend(
 
         const response =
             await fetch(
-                "http://192.168.115.79:8000/api/settings/network",
+                "http://127.0.0.1:8000/api/settings/network",
                 {
                     method: "PUT",
 
@@ -2843,7 +2824,7 @@ async function deleteDesktopFromFrontend(
         toast("Deleting desktop...");
 
         const response = await fetch(
-            `http://192.168.115.79:8000/api/desktops/${desktopId}`,
+            `http://127.0.0.1:8000/api/desktops/${desktopId}`,
             {
                 method: "DELETE",
 
@@ -3340,7 +3321,7 @@ async function loadCamerasFromBackend() {
     try {
 
         const response = await fetch(
-            "http://192.168.115.79:8000/api/cameras",
+            "http://127.0.0.1:8000/api/cameras",
             {
                 method: "GET",
 
@@ -4033,7 +4014,7 @@ async function submitCameraToBackend(
 
         const response =
             await fetch(
-                "http://192.168.115.79:8000/api/cameras",
+                "http://127.0.0.1:8000/api/cameras",
                 {
                     method: "POST",
 
@@ -4145,7 +4126,7 @@ async function pingCameraFromFrontend(
 
         const response =
             await fetch(
-                `http://192.168.115.79:8000/api/cameras/${cameraId}/ping`,
+                `http://127.0.0.1:8000/api/cameras/${cameraId}/ping`,
                 {
                     method: "POST",
 
@@ -5186,7 +5167,7 @@ document.addEventListener("DOMContentLoaded", function () {
 // One source of truth for Add / Ping / Delete.
 // ==========================================================
 
-const NMS_API_BASE = "http://192.168.115.79:8000";
+const NMS_API_BASE = "http://127.0.0.1:8000";
 const deviceMonitoringTimers = new Map();
 
 function getAuthToken() {
@@ -5604,7 +5585,7 @@ async function deleteCameraFromFrontend(cameraId, cameraCode) {
     try {
 
         const response = await fetch(
-            "http://192.168.115.79:8000/api/cameras/" + cameraId,
+            "http://127.0.0.1:8000/api/cameras/" + cameraId,
             {
                 method: "DELETE",
                 headers: {
@@ -6633,28 +6614,7 @@ async function loadNetworkMap() {
     } catch(err) { console.error('Map Error', err); }
 }
 
-// Logs
-async function loadLogs() {
-    try {
-        const token = localStorage.getItem('access_token');
-        if(!token) return;
-        const res = await fetch(NMS_API_BASE + '/api/logs', { headers: {'Authorization': 'Bearer ' + token} });
-        if(res.ok) {
-            const data = await res.json();
-            if(data.success) {
-                const logBox = document.querySelector('.log-box');
-                if(!logBox) return;
-                logBox.innerHTML = '';
-                data.logs.forEach(l => {
-                    const css = (l.description.includes('Offline')) ? 'crit' : 'info';
-                    const dStr = new Date(l.created_at).toLocaleString();
-                    logBox.innerHTML += '<div class="log-line">[' + dStr + '] <span class="' + css + '">' + l.event_type + '</span> <b>' + l.source_name + '</b> ' + l.description + '</div>';
-                });
-            }
-        }
-    } catch(err) {}
-}
-
+// Logs removed
 // Alerts
 async function loadAlerts() {
     try {
@@ -6740,7 +6700,6 @@ window.generateReport = async function() {
 
 document.addEventListener('DOMContentLoaded', () => {
     setTimeout(loadNetworkMap, 1200);
-    setTimeout(loadLogs, 1500);
     setTimeout(loadAlerts, 1800);
 });
 
