@@ -1,7 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from app.database import get_db_connection
 from app.auth import get_admin_from_token
+from app.report_analytics import generate_report_data, create_excel_report, create_csv_report, create_zip_report
 from datetime import datetime
 import threading
 import time
@@ -108,6 +109,81 @@ def get_reports(admin=Depends(verify_admin)):
         cursor.close()
         db.close()
 
+@router.get("/api/reports/analytics")
+def get_reports_analytics(from_date: str = None, to_date: str = None):
+    db = get_db_connection()
+    if not db:
+        raise HTTPException(status_code=500, detail="Database connection failed")
+    try:
+        return generate_report_data(db, from_date, to_date)
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    finally:
+        db.close()
+
+@router.get("/api/reports/export/excel")
+def export_reports_excel(from_date: str = None, to_date: str = None):
+    db = get_db_connection()
+    if not db:
+        raise HTTPException(status_code=500, detail="Database connection failed")
+    try:
+        report_data = generate_report_data(db, from_date, to_date)
+        excel_bytes = create_excel_report(report_data)
+        f_from = report_data["period"]["from_date"]
+        f_to = report_data["period"]["to_date"]
+        filename = f"Neo_Metaliks_Monitoring_Report_{f_from}_to_{f_to}.xlsx"
+        return Response(
+            content=excel_bytes,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+        )
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    finally:
+        db.close()
+
+@router.get("/api/reports/export/csv")
+def export_reports_csv(from_date: str = None, to_date: str = None):
+    db = get_db_connection()
+    if not db:
+        raise HTTPException(status_code=500, detail="Database connection failed")
+    try:
+        report_data = generate_report_data(db, from_date, to_date)
+        csv_content = create_csv_report(report_data)
+        f_from = report_data["period"]["from_date"]
+        f_to = report_data["period"]["to_date"]
+        filename = f"Neo_Metaliks_Monitoring_Report_{f_from}_to_{f_to}.csv"
+        return Response(
+            content=csv_content.encode("utf-8"),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+        )
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    finally:
+        db.close()
+
+@router.get("/api/reports/export/zip")
+def export_reports_zip(from_date: str = None, to_date: str = None):
+    db = get_db_connection()
+    if not db:
+        raise HTTPException(status_code=500, detail="Database connection failed")
+    try:
+        report_data = generate_report_data(db, from_date, to_date)
+        zip_bytes = create_zip_report(report_data)
+        f_from = report_data["period"]["from_date"]
+        f_to = report_data["period"]["to_date"]
+        filename = f"Neo_Metaliks_Monitoring_CSV_Bundle_{f_from}_to_{f_to}.zip"
+        return Response(
+            content=zip_bytes,
+            media_type="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+        )
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    finally:
+        db.close()
+
 last_status = {}
 
 def status_monitor_loop():
@@ -125,6 +201,7 @@ def status_monitor_loop():
                     if old and old != r['status']:
                         msg = f'Device {r["device_code"]} ({r["device_name"]}) went {r["status"]}'
                         cursor.execute('INSERT INTO alerts (source_type, source_name, message, severity, status, created_at) VALUES (%s, %s, %s, %s, %s, NOW())', ('Device', r['device_code'], msg, 'Critical' if r['status']=='Offline' else 'Info', 'New'))
+                        cursor.execute("INSERT INTO logs (event_type, source_type, source_name, description, created_at) VALUES ('Status Change', %s, %s, %s, NOW())", ('Device', r['device_code'], msg))
                         db.commit()
                         if r['status'] == 'Offline':
                             print(f'*** EMAIL SENT TO ADMIN: Alert! {r["status"]} - {msg} ***')
@@ -138,6 +215,7 @@ def status_monitor_loop():
                     if old and old != r['status']:
                         msg = f'Camera {r["camera_code"]} ({r["camera_name"]}) went {r["status"]}'
                         cursor.execute('INSERT INTO alerts (source_type, source_name, message, severity, status, created_at) VALUES (%s, %s, %s, %s, %s, NOW())', ('Camera', r['camera_code'], msg, 'Warning' if r['status']=='Offline' else 'Info', 'New'))
+                        cursor.execute("INSERT INTO logs (event_type, source_type, source_name, description, created_at) VALUES ('Status Change', %s, %s, %s, NOW())", ('Camera', r['camera_code'], msg))
                         db.commit()
                         if r['status'] == 'Offline':
                             print(f'*** EMAIL SENT TO ADMIN: Alert! {r["status"]} - {msg} ***')
@@ -151,6 +229,7 @@ def status_monitor_loop():
                     if old and old != r['status']:
                         msg = f'Desktop {r["desktop_code"]} ({r["department"]}) went {r["status"]}'
                         cursor.execute('INSERT INTO alerts (source_type, source_name, message, severity, status, created_at) VALUES (%s, %s, %s, %s, %s, NOW())', ('Desktop', r['desktop_code'], msg, 'Warning' if r['status']=='Offline' else 'Info', 'New'))
+                        cursor.execute("INSERT INTO logs (event_type, source_type, source_name, description, created_at) VALUES ('Status Change', %s, %s, %s, NOW())", ('Desktop', r['desktop_code'], msg))
                         db.commit()
                         if r['status'] == 'Offline':
                             print(f'*** EMAIL SENT TO ADMIN: Alert! {r["status"]} - {msg} ***')
@@ -163,6 +242,7 @@ def status_monitor_loop():
         time.sleep(10)
 
 threading.Thread(target=status_monitor_loop, daemon=True).start()
+
 
 from pydantic import BaseModel
 

@@ -4354,13 +4354,13 @@ if (generateReportBtn) {
 }
 
 
-function generateNMSReport() {
+async function generateNMSReport() {
 
     const from =
-        reportFromDate.value;
+        reportFromDate ? reportFromDate.value : "";
 
     const to =
-        reportToDate.value;
+        reportToDate ? reportToDate.value : "";
 
 
     /* Validation */
@@ -4402,29 +4402,222 @@ function generateNMSReport() {
 
     }
 
+    showReportMessage("Generating monitoring analytics from database for " + formatReadableDate(from) + " to " + formatReadableDate(to) + "...", "info");
 
-    /* Generate table */
+    const token = localStorage.getItem("access_token");
+    const apiBase = (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL) ? window.APP_CONFIG.API_BASE_URL : "";
+    const url = `${apiBase}/api/reports/analytics?from_date=${encodeURIComponent(from)}&to_date=${encodeURIComponent(to)}&_t=${Date.now()}`;
 
-    renderReportTable();
+    try {
+        const resp = await fetch(url, {
+            headers: token ? { "Authorization": `Bearer ${token}` } : {}
+        });
+
+        if (!resp.ok) {
+            throw new Error(`Server returned HTTP ${resp.status}`);
+        }
+
+        const data = await resp.json();
+        if (!data.success) {
+            throw new Error(data.message || "Failed to load report analytics");
+        }
+
+        // Store analytics in memory
+        window.currentReportAnalytics = data;
+
+        // Render table
+        renderAnalyticsTable(data);
+
+        // Update summary cards
+        updateAnalyticsSummary(data);
+
+        const totalAssets = (data.summary && data.summary.total_assets) || 0;
+        const uptime = (data.summary && data.summary.overall_availability_pct != null) ? data.summary.overall_availability_pct : "100.00";
+        const eventsCount = (data.status_history ? data.status_history.length : 0);
+
+        showReportMessage(
+            `Report generated: ${totalAssets} monitored assets (${uptime}% availability, ${eventsCount} events in period).`,
+            "success"
+        );
+
+        if (typeof toast === "function") {
+            toast("Report generated successfully");
+        }
+
+    } catch (err) {
+        console.warn("Analytics API failed, using cached fallback:", err);
+        renderReportTable();
+        updateReportSummary();
+        showReportMessage(
+            `Report generated (cached view) for ${formatReadableDate(from)} to ${formatReadableDate(to)}.`,
+            "success"
+        );
+        if (typeof toast === "function") {
+            toast("Report loaded (cached)");
+        }
+    }
+
+}
 
 
-    /* Update summary */
+function escapeHtml(str) {
+    if (str == null) return "";
+    return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+}
 
-    updateReportSummary();
+
+/* -----------------------------------------
+   REPORT TABLE - LIVE ANALYTICS
+----------------------------------------- */
+
+function renderAnalyticsTable(data) {
+
+    const tbody =
+        document.getElementById(
+            "reportTableBody"
+        );
+
+    if (!tbody) {
+        return;
+    }
+
+    tbody.innerHTML = "";
+
+    const allAssets = [];
+
+    // Devices
+    if (data.devices && Array.isArray(data.devices)) {
+        data.devices.forEach(d => {
+            allAssets.push({
+                id: d.id || d.code || "DEV",
+                name: d.name || "Device",
+                type: d.type || "Network Device",
+                category: "Device",
+                status: d.current_status || "Online",
+                ip: d.ip || "N/A",
+                uptime: (d.availability_pct != null ? d.availability_pct : (d.uptime_percent_db || "100.00")) + "%",
+                lastChecked: d.last_status_change || d.last_observed || "Recent",
+                onlineDuration: d.online_duration_readable || "N/A",
+                offlineDuration: d.offline_duration_readable || "N/A",
+                coverageNote: d.coverage_note || ""
+            });
+        });
+    }
+
+    // CCTV Cameras
+    if (data.cameras && Array.isArray(data.cameras)) {
+        data.cameras.forEach(c => {
+            allAssets.push({
+                id: c.id || c.code || "CAM",
+                name: c.name || "CCTV Camera",
+                type: "CCTV Camera",
+                category: "CCTV Camera",
+                status: c.current_status || "Online",
+                ip: c.ip || "N/A",
+                uptime: (c.availability_pct != null ? c.availability_pct : "100.00") + "%",
+                lastChecked: c.last_status_change || c.last_observed || "Recent",
+                onlineDuration: c.online_duration_readable || "N/A",
+                offlineDuration: c.offline_duration_readable || "N/A",
+                coverageNote: c.coverage_note || ""
+            });
+        });
+    }
+
+    // Desktops
+    if (data.desktops && Array.isArray(data.desktops)) {
+        data.desktops.forEach(d => {
+            allAssets.push({
+                id: d.id || d.code || "DSK",
+                name: d.name || "Desktop",
+                type: d.type || "Desktop Workstation",
+                category: "Desktop",
+                status: d.current_status || "Online",
+                ip: d.ip || "N/A",
+                uptime: (d.availability_pct != null ? d.availability_pct : "100.00") + "%",
+                lastChecked: d.last_status_change || d.last_observed || "Recent",
+                onlineDuration: d.online_duration_readable || "N/A",
+                offlineDuration: d.offline_duration_readable || "N/A",
+                coverageNote: d.coverage_note || ""
+            });
+        });
+    }
+
+    if (allAssets.length === 0) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="7" style="text-align:center; padding:30px; color:#71859a;">
+                    No monitored assets found for the selected date period
+                </td>
+            </tr>
+        `;
+        const recordCount = document.getElementById("reportRecordCount");
+        if (recordCount) recordCount.textContent = "0 Records";
+        return;
+    }
+
+    allAssets.forEach(function (device) {
+
+        const row = document.createElement("tr");
+
+        let statusClass = "report-status-online";
+        if (device.status === "Offline") {
+            statusClass = "report-status-offline";
+        } else if (device.status === "Warning") {
+            statusClass = "report-status-warning";
+        }
+
+        const tooltipTitle = `Online: ${device.onlineDuration} | Offline: ${device.offlineDuration}${device.coverageNote ? ' (' + device.coverageNote + ')' : ''}`;
+
+        row.innerHTML = `
+            <td><b>${escapeHtml(device.id)}</b></td>
+            <td>${escapeHtml(device.name)}</td>
+            <td>${escapeHtml(device.type)}</td>
+            <td><span class="${statusClass}">${escapeHtml(device.status)}</span></td>
+            <td>${escapeHtml(device.ip)}</td>
+            <td title="${escapeHtml(tooltipTitle)}">${escapeHtml(device.uptime)}</td>
+            <td><small>${escapeHtml(device.lastChecked)}</small></td>
+        `;
+
+        tbody.appendChild(row);
+
+    });
+
+    const recordCount = document.getElementById("reportRecordCount");
+    if (recordCount) {
+        const eventsCount = data.status_history ? data.status_history.length : 0;
+        recordCount.textContent = `${allAssets.length} Assets (${eventsCount} Events)`;
+    }
+
+}
 
 
-    /* Status */
+function updateAnalyticsSummary(data) {
 
-    showReportMessage(
-        `Report generated successfully for ${formatReadableDate(from)} to ${formatReadableDate(to)}.`,
-        "success"
-    );
+    if (!data || !data.summary) return;
+
+    const totalElement = document.getElementById("reportTotalDevices");
+    const onlineElement = document.getElementById("reportOnlineDevices");
+    const alertElement = document.getElementById("reportActiveAlerts") || document.getElementById("reportAlerts");
+    const uptimeElement = document.getElementById("reportUptime");
+
+    if (totalElement) totalElement.textContent = data.summary.total_assets;
+    if (onlineElement) onlineElement.textContent = data.summary.online_count;
+    if (alertElement) alertElement.textContent = data.summary.offline_count;
+    if (uptimeElement) {
+        const pct = data.summary.overall_availability_pct != null ? data.summary.overall_availability_pct : "100.00";
+        uptimeElement.textContent = pct + "%";
+    }
 
 }
 
 
 /* -----------------------------------------
-   REPORT TABLE
+   REPORT TABLE (FALLBACK)
 ----------------------------------------- */
 
 function renderReportTable() {
@@ -4502,7 +4695,7 @@ function renderReportTable() {
 
 
 /* -----------------------------------------
-   REPORT SUMMARY
+   REPORT SUMMARY (FALLBACK)
 ----------------------------------------- */
 
 function updateReportSummary() {
@@ -4537,6 +4730,9 @@ function updateReportSummary() {
         );
 
     const alertElement =
+        document.getElementById(
+            "reportActiveAlerts"
+        ) ||
         document.getElementById(
             "reportAlerts"
         );
@@ -4688,7 +4884,58 @@ const reportDownloadData = [
 // CSV DOWNLOAD
 // ===============================
 
-function downloadCSVReport() {
+async function downloadCSVReport() {
+
+    const from =
+        reportFromDate ? reportFromDate.value : "";
+
+    const to =
+        reportToDate ? reportToDate.value : "";
+
+    const apiBase =
+        (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL) ? window.APP_CONFIG.API_BASE_URL : "";
+
+    const token =
+        localStorage.getItem("access_token");
+
+    showReportMessage("Preparing detailed CSV export from server...", "info");
+    if (typeof toast === "function") toast("Preparing CSV export...");
+
+    try {
+        const url = `${apiBase}/api/reports/export/csv?from_date=${encodeURIComponent(from)}&to_date=${encodeURIComponent(to)}&_t=${Date.now()}`;
+        const resp = await fetch(url, {
+            headers: token ? { "Authorization": `Bearer ${token}` } : {}
+        });
+
+        if (!resp.ok) {
+            throw new Error(`Export API HTTP error: ${resp.status}`);
+        }
+
+        const blob = await resp.blob();
+        const downloadUrl = window.URL.createObjectURL(blob);
+        const link = document.createElement("a");
+
+        link.href = downloadUrl;
+        const filenameRange = (from && to) ? `${from}_to_${to}` : "full";
+        link.download = `Neo_Metaliks_Network_Report_${filenameRange}.csv`;
+
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+
+        window.URL.revokeObjectURL(downloadUrl);
+
+        showReportMessage("Detailed CSV report downloaded successfully.", "success");
+        if (typeof toast === "function") toast("CSV downloaded successfully");
+
+    } catch (err) {
+        console.warn("Server CSV export failed, falling back to client-side CSV:", err);
+        downloadCSVReportFallback();
+    }
+
+}
+
+function downloadCSVReportFallback() {
 
     let csv = "Device,Type,IP Address,Status,Uptime\n";
 
@@ -4727,6 +4974,10 @@ function downloadCSVReport() {
     document.body.removeChild(link);
 
     URL.revokeObjectURL(url);
+
+    showReportMessage("Baseline CSV report downloaded.", "success");
+    if (typeof toast === "function") toast("CSV report downloaded");
+
 }
 
 
@@ -4734,13 +4985,64 @@ function downloadCSVReport() {
 // EXCEL DOWNLOAD
 // ===============================
 
-function downloadExcelReport() {
+async function downloadExcelReport() {
+
+    const from =
+        reportFromDate ? reportFromDate.value : "";
+
+    const to =
+        reportToDate ? reportToDate.value : "";
+
+    const apiBase =
+        (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL) ? window.APP_CONFIG.API_BASE_URL : "";
+
+    const token =
+        localStorage.getItem("access_token");
+
+    showReportMessage("Generating 5-sheet Excel workbook from server...", "info");
+    if (typeof toast === "function") toast("Generating 5-sheet Excel report...");
+
+    try {
+        const url = `${apiBase}/api/reports/export/excel?from_date=${encodeURIComponent(from)}&to_date=${encodeURIComponent(to)}&_t=${Date.now()}`;
+        const resp = await fetch(url, {
+            headers: token ? { "Authorization": `Bearer ${token}` } : {}
+        });
+
+        if (!resp.ok) {
+            throw new Error(`Export API HTTP error: ${resp.status}`);
+        }
+
+        const blob = await resp.blob();
+        const downloadUrl = window.URL.createObjectURL(blob);
+        const link = document.createElement("a");
+
+        link.href = downloadUrl;
+        const filenameRange = (from && to) ? `${from}_to_${to}` : "full";
+        link.download = `Neo_Metaliks_Network_Report_${filenameRange}.xlsx`;
+
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+
+        window.URL.revokeObjectURL(downloadUrl);
+
+        showReportMessage("Excel workbook (5 sheets) downloaded successfully.", "success");
+        if (typeof toast === "function") toast("Excel workbook downloaded");
+
+    } catch (err) {
+        console.warn("Server Excel export failed, falling back to SheetJS:", err);
+        downloadExcelReportFallback();
+    }
+
+}
+
+function downloadExcelReportFallback() {
 
     // Check SheetJS
     if (typeof XLSX === "undefined") {
 
         alert(
-            "Excel library load হয়নি। CSV download ব্যবহার করুন অথবা internet connection check করুন."
+            "Excel library load হয়নি। CSV download ব্যবহার করুন অথবা internet connection check করুন."
         );
 
         return;
@@ -4774,6 +5076,66 @@ function downloadExcelReport() {
         workbook,
         "Neo_Metaliks_Network_Report.xlsx"
     );
+
+    showReportMessage("Baseline Excel report downloaded.", "success");
+    if (typeof toast === "function") toast("Excel report downloaded");
+
+}
+
+
+// ===============================
+// ZIP (ALL CSVs) DOWNLOAD
+// ===============================
+
+async function downloadZipReport() {
+
+    const from =
+        reportFromDate ? reportFromDate.value : "";
+
+    const to =
+        reportToDate ? reportToDate.value : "";
+
+    const apiBase =
+        (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL) ? window.APP_CONFIG.API_BASE_URL : "";
+
+    const token =
+        localStorage.getItem("access_token");
+
+    showReportMessage("Packaging multi-section CSV reports into ZIP...", "info");
+    if (typeof toast === "function") toast("Creating ZIP bundle...");
+
+    try {
+        const url = `${apiBase}/api/reports/export/zip?from_date=${encodeURIComponent(from)}&to_date=${encodeURIComponent(to)}&_t=${Date.now()}`;
+        const resp = await fetch(url, {
+            headers: token ? { "Authorization": `Bearer ${token}` } : {}
+        });
+
+        if (!resp.ok) {
+            throw new Error(`Export API HTTP error: ${resp.status}`);
+        }
+
+        const blob = await resp.blob();
+        const downloadUrl = window.URL.createObjectURL(blob);
+        const link = document.createElement("a");
+
+        link.href = downloadUrl;
+        const filenameRange = (from && to) ? `${from}_to_${to}` : "full";
+        link.download = `Neo_Metaliks_Network_Reports_CSV_Bundle_${filenameRange}.zip`;
+
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+
+        window.URL.revokeObjectURL(downloadUrl);
+
+        showReportMessage("ZIP bundle containing all CSV reports downloaded successfully.", "success");
+        if (typeof toast === "function") toast("ZIP bundle downloaded");
+
+    } catch (err) {
+        console.error("ZIP download failed:", err);
+        showReportMessage("Failed to download ZIP: " + err.message, "error");
+    }
+
 }
 
 
@@ -4788,6 +5150,9 @@ document.addEventListener("DOMContentLoaded", function () {
 
     const excelButton =
         document.getElementById("downloadExcel");
+
+    const zipButton =
+        document.getElementById("downloadZIP");
 
 
     if (csvButton) {
@@ -4815,6 +5180,22 @@ document.addEventListener("DOMContentLoaded", function () {
                 event.preventDefault();
 
                 downloadExcelReport();
+
+            }
+        );
+
+    }
+
+
+    if (zipButton) {
+
+        zipButton.addEventListener(
+            "click",
+            function (event) {
+
+                event.preventDefault();
+
+                downloadZipReport();
 
             }
         );
@@ -6617,69 +6998,15 @@ window.ackAlerts = async function () {
     } catch (err) { }
 };
 
-// Reports Override
-window.generateReport = async function () {
-    try {
-        const token = localStorage.getItem('access_token');
-        const res = await fetch(NMS_API_BASE + '/api/reports?_t=' + Date.now(), { headers: { 'Authorization': 'Bearer ' + token } });
-        if (res.ok) {
-            const data = await res.json();
-            if (data.success) {
-                const tbody = document.getElementById('reportTbody');
-                if (tbody) {
-                    tbody.innerHTML = '';
-                    let rTotal = 0, rOnline = 0, avgUptime = 0;
-                    data.report.forEach(r => {
-                        rTotal++;
-                        if (r.status === 'Online') rOnline++;
-                        avgUptime += parseFloat(r.uptime || 0);
-                        const statusHTML = r.status === 'Online' ? '<span class="status-badge online">? Online</span>' : '<span class="status-badge offline">? Offline</span>';
-                        tbody.innerHTML += '<tr>' +
-                            '<td><b>' + r.id + '</b><small>' + r.name + '</small></td>' +
-                            '<td>' + r.type + '</td>' +
-                            '<td>' + r.ip + '</td>' +
-                            '<td>' + (r.uptime || 0) + '%</td>' +
-                            '<td>' + statusHTML + '</td>' +
-                            '</tr>';
-                    });
-
-                    const rtTotal = document.getElementById('reportTotalDevices');
-                    const rtOnline = document.getElementById('reportOnlineDevices');
-                    const rtUptime = document.getElementById('reportAvgUptime');
-
-                    if (rtTotal) rtTotal.textContent = rTotal;
-                    if (rtOnline) rtOnline.textContent = rOnline;
-                    if (rtUptime) rtUptime.textContent = rTotal > 0 ? (avgUptime / rTotal).toFixed(2) + '%' : '0%';
-                }
-
-                window.nmsReportData = data.report;
-            }
-        }
-        toast('Report generated successfully');
-    } catch (err) {
-        toast('Failed to generate report');
-    }
+// Reports Unified Linkage
+window.generateReport = function () {
+    return generateNMSReport();
 };
 
 document.addEventListener('DOMContentLoaded', () => {
     setTimeout(loadNetworkMap, 1200);
     setTimeout(loadAlerts, 1800);
 });
-
-// Map report data for downloads
-const origGen = window.generateReport;
-window.generateReport = async function () {
-    await origGen();
-    if (window.nmsReportData) {
-        window.reportDownloadData = window.nmsReportData.map(r => ({
-            device: r.id + ' - ' + r.name,
-            type: r.type,
-            ip: r.ip,
-            status: r.status,
-            uptime: r.uptime + '%'
-        }));
-    }
-};
 
 
 // --- AUTO MONITORING FIX ---
