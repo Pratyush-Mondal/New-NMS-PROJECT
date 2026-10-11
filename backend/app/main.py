@@ -1,3 +1,12 @@
+import sys
+import io
+if sys.platform == "win32":
+    try:
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 from fastapi import FastAPI
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
@@ -4213,7 +4222,7 @@ def automatic_desktop_monitoring_loop():
 
 def automatic_cctv_monitoring_loop():
 
-    print("📹 NMS automatic CCTV monitoring started.")
+    print("[CCTV] NMS automatic CCTV monitoring started.")
 
     while not cctv_monitoring_stop_event.is_set():
 
@@ -4551,7 +4560,7 @@ def start_automatic_monitoring():
 
         cctv_monitoring_thread.start()
 
-        print("📹 NMS automatic CCTV monitoring started.")
+        print("[CCTV] NMS automatic CCTV monitoring started.")
 
 
     # ==========================================
