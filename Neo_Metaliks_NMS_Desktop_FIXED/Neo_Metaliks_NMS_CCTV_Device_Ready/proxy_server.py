@@ -13,6 +13,13 @@ class UnifiedNMSHandler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=FRONTEND_DIR, **kwargs)
 
+    def end_headers(self):
+        if hasattr(self, "path") and any(self.path.split("?")[0].endswith(ext) for ext in (".html", ".js")):
+            self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+            self.send_header("Pragma", "no-cache")
+            self.send_header("Expires", "0")
+        super().end_headers()
+
     def do_OPTIONS(self):
         if self.path.startswith("/api/") or self.path in ("/docs", "/openapi.json"):
             self.send_response(200)
