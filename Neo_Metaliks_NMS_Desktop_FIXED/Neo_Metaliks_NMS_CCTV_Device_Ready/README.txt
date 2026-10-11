@@ -18,12 +18,13 @@ Important:
 8. DELETE and manual PING buttons remain available.
 
 Run backend from the backend folder:
-uvicorn app.main:app --reload
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
 Do not share .env or credentials.
 
 
-uvicorn app.main:app --reload  (uvicorn reload er command)
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload  (uvicorn reload er command)
 
 cd "C:\Users\windows10 pro\OneDrive\Desktop\NML PROJECT\backend"  (terminal backend start command)
 .\venv\Scripts\Activate.ps1  (activate command)
+

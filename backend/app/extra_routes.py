@@ -71,7 +71,7 @@ def get_alerts(admin=Depends(verify_admin)):
         raise HTTPException(status_code=500)
     cursor = db.cursor(dictionary=True)
     try:
-        cursor.execute("SELECT * FROM alerts ORDER BY created_at DESC LIMIT 50")
+        cursor.execute("SELECT * FROM alerts WHERE status='New' ORDER BY created_at DESC LIMIT 50")
         return {"success": True, "alerts": cursor.fetchall()}
     finally:
         cursor.close()
@@ -163,3 +163,47 @@ def status_monitor_loop():
         time.sleep(10)
 
 threading.Thread(target=status_monitor_loop, daemon=True).start()
+
+from pydantic import BaseModel
+
+class GlobalSettingsRequest(BaseModel):
+    alert: bool
+    autoRecovery: bool
+    autoRestart: bool
+    emailNotification: bool
+    soundNotification: bool
+    automaticBackup: bool
+    autoCleanup: bool
+    historyRetention: int
+    backupRetention: int
+
+@router.put("/api/settings/global")
+def update_global_settings(data: GlobalSettingsRequest, admin=Depends(verify_admin)):
+    db = get_db_connection()
+    if not db:
+        raise HTTPException(status_code=500, detail="DB Error")
+    cursor = db.cursor()
+    try:
+        settings_dict = data.dict()
+        for k, v in settings_dict.items():
+            cursor.execute("INSERT INTO system_settings (setting_key, setting_value) VALUES (%s, %s) ON DUPLICATE KEY UPDATE setting_value = %s", (k, str(v), str(v)))
+        db.commit()
+        return {"success": True}
+    finally:
+        cursor.close()
+        db.close()
+
+@router.get("/api/settings/global")
+def get_global_settings(admin=Depends(verify_admin)):
+    db = get_db_connection()
+    if not db:
+        raise HTTPException(status_code=500, detail="DB Error")
+    cursor = db.cursor(dictionary=True)
+    try:
+        cursor.execute("SELECT setting_key, setting_value FROM system_settings")
+        rows = cursor.fetchall()
+        settings = {r["setting_key"]: r["setting_value"] for r in rows}
+        return {"success": True, "settings": settings}
+    finally:
+        cursor.close()
+        db.close()

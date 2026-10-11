@@ -4362,3 +4362,82 @@ body.light-theme .setting-row p {
     }
 
 }
+/* PREMIUM DASHBOARD ENHANCEMENTS */
+.hero {
+    background: linear-gradient(135deg, rgba(16, 33, 50, 0.8), rgba(11, 22, 34, 0.9)), url('data:image/svg+xml;utf8,<svg width="20" height="20" xmlns="http://www.w3.org/2000/svg"><circle cx="2" cy="2" r="1" fill="rgba(255,255,255,0.05)"/></svg>');
+    border: 1px solid rgba(43, 77, 104, 0.5);
+    border-radius: 12px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+    position: relative;
+    overflow: hidden;
+}
+.hero::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0; height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(77, 179, 242, 0.5), transparent);
+}
+.stat {
+    transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+    border: 1px solid rgba(43, 77, 104, 0.3);
+    border-radius: 12px;
+    background: rgba(16, 33, 50, 0.6);
+    backdrop-filter: blur(10px);
+}
+.stat:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 12px 24px rgba(0,0,0,0.4);
+    border-color: rgba(77, 179, 242, 0.6);
+    background: rgba(20, 40, 60, 0.8);
+}
+.card {
+    transition: all 0.3s ease;
+    border-radius: 12px;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.2);
+    border: 1px solid rgba(43, 77, 104, 0.4);
+}
+.card:hover {
+    box-shadow: 0 12px 28px rgba(0,0,0,0.3);
+    border-color: rgba(77, 179, 242, 0.3);
+}
+.alert {
+    transition: all 0.2s ease;
+    border-radius: 8px;
+    margin-bottom: 10px;
+}
+.alert:hover {
+    transform: translateX(5px);
+    background-color: rgba(255,255,255,0.03);
+}
+.quick button {
+    transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+    border-radius: 10px;
+    border: 1px solid rgba(43, 77, 104, 0.5);
+    background: rgba(16, 33, 50, 0.8);
+}
+.quick button:hover {
+    transform: translateY(-4px) scale(1.02);
+    border-color: rgba(77, 179, 242, 0.8);
+    box-shadow: 0 8px 20px rgba(77, 179, 242, 0.15);
+}
+.availability .bar {
+    border-radius: 6px;
+    background: rgba(0,0,0,0.3);
+    box-shadow: inset 0 1px 3px rgba(0,0,0,0.5);
+    overflow: hidden;
+}
+.availability .bar i {
+    border-radius: 6px;
+    background: linear-gradient(90deg, #2bd49b, #4db3f2);
+    box-shadow: 0 0 10px rgba(43, 212, 155, 0.4);
+    transition: width 1s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+.health div {
+    transition: all 0.2s ease;
+    padding: 8px;
+    border-radius: 6px;
+}
+.health div:hover {
+    background: rgba(255,255,255,0.03);
+    padding-left: 12px;
+}

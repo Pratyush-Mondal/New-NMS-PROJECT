@@ -44,9 +44,12 @@ def verify_password(password: str, stored_hash: str) -> bool:
 
 
 def authenticate_admin(email: str, password: str):
+    import sys
+    print(f"DEBUG: authenticate_admin called with email={email}", file=sys.stderr)
     connection = get_db_connection()
 
     if connection is None:
+        print("DEBUG: connection is None", file=sys.stderr)
         return None
 
     cursor = None
@@ -74,10 +77,18 @@ def authenticate_admin(email: str, password: str):
 
         admin = cursor.fetchone()
 
-        if not admin or not admin["is_active"]:
+        if not admin:
+            print("DEBUG: admin not found in DB", file=sys.stderr)
+            return None
+            
+        if not admin["is_active"]:
+            print("DEBUG: admin is inactive", file=sys.stderr)
             return None
 
-        if not verify_password(password, admin["password_hash"]):
+        is_valid = verify_password(password, admin["password_hash"])
+        print(f"DEBUG: verify_password returned {is_valid}", file=sys.stderr)
+        
+        if not is_valid:
             return None
 
         return admin

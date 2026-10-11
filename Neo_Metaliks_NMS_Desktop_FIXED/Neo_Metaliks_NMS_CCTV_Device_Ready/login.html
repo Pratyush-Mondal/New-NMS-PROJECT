@@ -201,14 +201,6 @@
         }
 
 
-        .login-btn:disabled {
-
-            opacity: 0.7;
-
-            cursor: not-allowed;
-        }
-
-
         .error {
 
             display: none;
@@ -246,7 +238,7 @@
 
     </style>
 
-</head>
+<script src="config.js"></script></head>
 
 
 <body>
@@ -269,48 +261,32 @@
         </p>
 
 
-        <form
-            onsubmit="adminLogin(event)"
-            class="login-form"
+<form onsubmit="adminLogin(event)" class="login-form">
+
+    <div class="input-group">
+        <input
+            type="email"
+            id="email"
+            placeholder="Enter your email"
+            required
         >
+    </div>
 
-            <div class="input-group">
+    <div class="input-group">
+        <input
+            type="password"
+            id="password"
+            placeholder="Enter password"
+            required
+        >
+    </div>
 
-                <input
-                    type="email"
-                    id="email"
-                    placeholder="Enter your email"
-                    autocomplete="username"
-                    required
-                >
+    <button type="submit" class="login-btn">
+        <span>Login</span>
+        <span class="login-arrow">→</span>
+    </button>
 
-            </div>
-
-
-            <div class="input-group">
-
-                <input
-                    type="password"
-                    id="password"
-                    placeholder="Enter password"
-                    autocomplete="current-password"
-                    required
-                >
-
-            </div>
-
-
-            <button
-                type="submit"
-                class="login-btn"
-            >
-
-                <span>Login</span>
-                <span class="login-arrow">→</span>
-
-            </button>
-
-        </form>
+</form>
 
 
         <div class="footer">
@@ -322,246 +298,80 @@
     </div>
 
 
-
 <script>
-
-async function adminLogin(event) {
-
+function adminLogin(event) {
     event.preventDefault();
 
+    const email = document.getElementById("email").value.trim();
+    const password = document.getElementById("password").value;
 
-    const emailElement =
-        document.getElementById("email");
-
-    const passwordElement =
-        document.getElementById("password");
-
-    const loginButton =
-        document.querySelector(".login-btn");
-
-
-    const email =
-        emailElement
-            ? emailElement.value.trim()
-            : "";
-
-
-    const password =
-        passwordElement
-            ? passwordElement.value
-            : "";
-
-
-    // ==========================================
-    // BASIC VALIDATION
-    // ==========================================
-
-    if (!email || !password) {
-
-        alert(
-            "Please enter email and password."
-        );
-
+    if (email === "" || password === "") {
+        alert("Please enter email and password.");
         return;
     }
 
+    localStorage.setItem("loggedIn", "true");
+    localStorage.setItem("adminLoggedIn", "true");
+    localStorage.setItem("admin_name", "Administrator");
+    localStorage.setItem("admin_email", email);
 
-    const originalButtonHTML =
-        loginButton
-            ? loginButton.innerHTML
-            : "Login";
+    alert("Login successful!");
 
+    window.location.href = "index.html";
+}
+</script>
+<script>
+function adminLogin(event) {
+    event.preventDefault();
 
-    try {
+    const email = document.getElementById("email").value.trim();
+    const password = document.getElementById("password").value;
 
-        // ======================================
-        // BUTTON LOADING STATE
-        // ======================================
-
-        if (loginButton) {
-
-            loginButton.disabled = true;
-
-            loginButton.innerHTML =
-                "Logging in...";
-        }
-
-
-        // ======================================
-        // BACKEND LOGIN API
-        // ======================================
-
-        const response =
-            await fetch(
-                "http://127.0.0.1:8000/api/auth/login",
-                {
-                    method: "POST",
-
-                    headers: {
-                        "Content-Type":
-                            "application/json"
-                    },
-
-                    body: JSON.stringify({
-                        email: email,
-                        password: password
-                    })
-                }
-            );
-
-
-        const data =
-            await response.json();
-
-
-        console.log(
-            "✅ LOGIN API RESPONSE:",
-            data
-        );
-
-
-        // ======================================
-        // CHECK HTTP RESPONSE
-        // ======================================
-
-        if (!response.ok) {
-
-            throw new Error(
-                data.message ||
-                data.detail ||
-                "Login request failed."
-            );
-        }
-
-
-        // ======================================
-        // CHECK BACKEND SUCCESS
-        // ======================================
-
-        if (
-            !data.success ||
-            !data.access_token ||
-            !data.admin
-        ) {
-
-            throw new Error(
-                data.message ||
-                "Invalid email or password."
-            );
-        }
-
-
-        // ======================================
-        // SAVE JWT ACCESS TOKEN
-        // ======================================
-
-        localStorage.setItem(
-            "access_token",
-            data.access_token
-        );
-
-
-        // ======================================
-        // SAVE ADMIN INFORMATION
-        // ======================================
-
-        localStorage.setItem(
-            "admin_id",
-            data.admin.id
-        );
-
-        localStorage.setItem(
-            "admin_name",
-            data.admin.name || ""
-        );
-
-        localStorage.setItem(
-            "admin_email",
-            data.admin.email || ""
-        );
-
-        localStorage.setItem(
-            "admin_phone",
-            data.admin.phone || ""
-        );
-
-        localStorage.setItem(
-            "admin_department",
-            data.admin.department || ""
-        );
-
-        localStorage.setItem(
-            "admin_location",
-            data.admin.location || ""
-        );
-
-
-        // Existing frontend login flags
-        localStorage.setItem(
-            "loggedIn",
-            "true"
-        );
-
-        localStorage.setItem(
-            "adminLoggedIn",
-            "true"
-        );
-
-
-        // ======================================
-        // SUCCESS
-        // ======================================
-
-        console.log(
-            "✅ JWT token saved successfully."
-        );
-
-
-        alert(
-            "Login successful!"
-        );
-
-
-        // ======================================
-        // GO TO INDEX / DASHBOARD
-        // ======================================
-
-        window.location.replace(
-            "index.html"
-        );
-
-
-    } catch (error) {
-
-        console.error(
-            "❌ LOGIN ERROR:",
-            error
-        );
-
-
-        alert(
-            error.message ||
-            "Unable to login. Please try again."
-        );
-
-
-    } finally {
-
-        if (loginButton) {
-
-            loginButton.disabled = false;
-
-            loginButton.innerHTML =
-                originalButtonHTML;
-        }
-
+    if (email === "" || password === "") {
+        alert("Please enter email and password.");
+        return;
     }
 
+    const loginButton = document.querySelector(".login-btn");
+    const originalText = loginButton ? loginButton.innerHTML : "Login";
+    if (loginButton) {
+        loginButton.disabled = true;
+        loginButton.innerHTML = "Logging in...";
+    }
+
+    const apiUrl = window.APP_CONFIG.API_BASE_URL + "/api/auth/login";
+
+    fetch(apiUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email, password: password })
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (!data.success || !data.access_token || !data.admin) {
+            throw new Error(data.message || "Invalid email or password.");
+        }
+        localStorage.setItem("access_token", data.access_token);
+        localStorage.setItem("admin_id", data.admin.id);
+        localStorage.setItem("admin_name", data.admin.name || "");
+        localStorage.setItem("admin_email", data.admin.email || "");
+        localStorage.setItem("loggedIn", "true");
+        localStorage.setItem("adminLoggedIn", "true");
+        window.location.href = "index.html";
+    })
+    .catch(err => {
+        console.error("LOGIN ERROR:", err);
+        alert(err.message || "Unable to login. Please try again.");
+        if (loginButton) {
+            loginButton.disabled = false;
+            loginButton.innerHTML = originalText;
+        }
+    });
 }
-
 </script>
-
-
+<script>
+// Removed dummy login listener
+</script>
 </body>
 
 </html>

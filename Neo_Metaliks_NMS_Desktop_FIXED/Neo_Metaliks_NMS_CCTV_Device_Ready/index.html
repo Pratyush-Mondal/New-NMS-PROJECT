@@ -18,7 +18,7 @@
     try {
 
         const response = await fetch(
-            "http://127.0.0.1:8000/api/auth/me",
+            "http://" + window.location.hostname + ":8000/api/auth/me",
             {
                 method: "GET",
                 headers: {
@@ -71,8 +71,8 @@
     <div class="nav-title">MAIN</div>
     <nav>
       <a href="#dashboard" class="nav active" data-page="dashboard"><span>⌂</span>Dashboard</a>
-      <a href="#devices" class="nav" data-page="devices"><span>◈</span>Devices <em>48</em></a>
-      <a href="#cameras" class="nav" data-page="cameras"><span>▣</span>CCTV Cameras <em>24</em></a>
+      <a href="#devices" class="nav" data-page="devices"><span>◈</span>Devices <em id="sidebarDevicesCount">0</em></a>
+      <a href="#cameras" class="nav" data-page="cameras"><span>▣</span>CCTV Cameras <em id="sidebarCamerasCount">0</em></a>
       <!-- ADD THIS -->
       <a href="#network" class="nav" data-page="network">
           <span>⌁</span>Network Map </a>
@@ -80,7 +80,7 @@
           <span>🖥️</span>Desktop Management
       </a>
       <div class="nav-title">OPERATIONS</div>
-      <a href="#alerts" class="nav" data-page="alerts"><span>⚠</span>Alerts <em class="danger-badge">3</em></a>
+      <a href="#alerts" class="nav" data-page="alerts"><span>⚠</span>Alerts <em class="danger-badge" id="sidebarAlertsCount">0</em></a>
        <a href="#reports" class="nav" data-page="reports"><span>▥</span>Reports</a>
       <div class="nav-title">SYSTEM</div>
       <a href="#settings" class="nav" data-page="settings"><span>⚙</span>Settings</a>
@@ -101,7 +101,7 @@
       <div class="top-right">
         <div class="live"><i></i> LIVE</div>
         <div class="clock" id="clock">00:00:00</div>
-        <button class="bell" onclick="toast('No new critical notifications')">♢<sup>3</sup></button>
+        <button class="bell" onclick="document.querySelector('[data-page=&quot;alerts&quot;]').click()">♢<sup id="headerAlertsCount">0</sup></button>
        <div class="user-profile" id="adminButton">
     <div class="admin-avatar">A</div>
 
@@ -130,9 +130,7 @@
         ⚙️ <span>Admin Settings</span>
     </button>
 
-    <button type="button" class="admin-menu-item" onclick="showAdminActivity()">
-        📋 <span>Activity Log</span>
-    </button>
+    
 
     <button type="button" class="admin-menu-item logout-item" onclick="adminLogout()">
         🚪 <span>Logout</span>
@@ -557,7 +555,6 @@
           <div class="stat"><div class="stat-icon blue">◈</div><div><small>Total Devices</small><strong id="dashTotal">N/A</strong><span class="positive">▲ 2 online today</span></div></div>
           <div class="stat"><div class="stat-icon green">✓</div><div><small>Online Devices</small><strong id="dashOnline">N/A</strong><span class="positive">91.7% availability</span></div></div>
           <div class="stat"><div class="stat-icon red">⚠</div><div><small>Active Alerts</small><strong id="dashAlerts">N/A</strong><span class="negative">Needs attention</span></div></div>
-          <div class="stat"><div class="stat-icon purple">⌁</div><div><small>Network Load</small><strong id="dashLoad">N/A</strong><span class="positive">Stable traffic</span></div></div>
         </div>
         <div class="grid two">
           <div class="card chart-card">
@@ -581,10 +578,12 @@
           </div>
           <div class="card">
             <div class="card-head"><div><h3>Quick Access</h3><p>Open monitoring modules</p></div></div>
-            <div class="quick">
-              <button onclick="openPage('cameras')"><strong>▣</strong><b>CCTV Wall</b><small>24 cameras</small></button>
-              <button onclick="openPage('network')"><strong>⌁</strong><b>Network Map</b><small>48 devices</small></button>
-            </div>
+            <div class="quick" style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
+                <button onclick="openPage('cameras')"><strong>&#128249;</strong><b>CCTV Wall</b><small id="dashQuickCCTV">...</small></button>
+                <button onclick="openPage('network')"><strong>&#127760;</strong><b>Network Map</b><small id="dashQuickNetwork">...</small></button>
+                <button onclick="openPage('devices')"><strong>&#128421;</strong><b>Devices</b><small id="dashQuickDevices">...</small></button>
+                <button onclick="openPage('desktops')"><strong>&#128187;</strong><b>Desktops</b><small id="dashQuickDesktops">...</small></button>
+              </div>
           </div>
         </div>
       </section>
@@ -615,7 +614,7 @@
 
 </div>
         </div>
-        <div class="toolbar"><input id="deviceSearch" placeholder="⌕ Search device, IP or location..." oninput="filterDevices()"><select><option>All Types</option><option>Switch</option><option>Router</option><option>Access Point</option></select><select><option>All Status</option><option>Online</option><option>Offline</option></select></div>
+        <div class="toolbar"><input id="deviceSearch" placeholder="&#128269;  Search device, IP or location..." oninput="filterDevices()"><select id="deviceTypeFilter" onchange="filterDevices()"><option value="All Types">All Types</option><option value="Switch">Switch</option><option value="Router">Router</option><option value="Access Point">Access Point</option><option value="Firewall">Firewall</option></select><select id="deviceStatusFilter" onchange="filterDevices()"><option value="All Status">All Status</option><option value="Online">Online</option><option value="Offline">Offline</option></select></div>
   <div class="card table-wrap">
 
     <table>
@@ -1625,63 +1624,26 @@
             </div>
 
 
-            <div class="setting-item">
+                          <div class="setting-item">
                 <label>Language</label>
                 <select id="language">
-                    <option value="english">English</option>
-                    <option value="bengali">Bengali</option>
-                    <option value="hindi">Hindi</option>
+                    <option value="en">English (System)</option>
+                    <option value="bn">Bengali (?????)</option>
+                    <option value="hi">Hindi (??????)</option>
                 </select>
-            </div>
+              </div>
 
 
-            <div class="setting-item">
-                <label>Timezone</label>
-                <select id="timezone">
-
-                    <option value="Asia/Kolkata">
-                        India (GMT +5:30)
-                    </option>
-
-                    <option value="UTC">
-                        UTC
-                    </option>
-
-                    <option value="Asia/Dhaka">
-                        Bangladesh (GMT +6)
-                    </option>
-
-                    <option value="Asia/Dubai">
-                        Dubai (GMT +4)
-                    </option>
-
-                    <option value="Europe/London">
-                        London
-                    </option>
-
-                    <option value="America/New_York">
-                        New York
-                    </option>
-
+                          <div class="setting-item">
+                <label>Time Format</label>
+                <select id="timeFormat">
+                    <option value="24">Train Time (24-hour)</option>
+                    <option value="12">System Time (12-hour)</option>
                 </select>
-            </div>
+              </div>
 
 
-            <div class="setting-item">
-
-                <label>Dashboard Refresh</label>
-
-                <select id="dashboardRefresh">
-
-                    <option value="5">5 Seconds</option>
-                    <option value="10">10 Seconds</option>
-                    <option value="30">30 Seconds</option>
-                    <option value="60">1 Minute</option>
-                    <option value="300">5 Minutes</option>
-
-                </select>
-
-            </div>
+            
 
         </div>
 
@@ -1813,41 +1775,11 @@
 
 
 
-        <div class="setting-row">
-
-            <div>
-                <strong>Auto Recovery</strong>
-                <p>Automatically recover failed services</p>
-            </div>
-
-            <label class="switch">
-
-                <input type="checkbox" id="autoRecovery">
-
-                <span class="slider"></span>
-
-            </label>
-
-        </div>
+        
 
 
 
-        <div class="setting-row">
-
-            <div>
-                <strong>Auto Restart</strong>
-                <p>Automatically restart failed services</p>
-            </div>
-
-            <label class="switch">
-
-                <input type="checkbox" id="autoRestart">
-
-                <span class="slider"></span>
-
-            </label>
-
-        </div>
+        
 
     </div>
 
@@ -1859,22 +1791,7 @@
         <h2>📧 Notification Settings</h2>
 
 
-        <div class="setting-row">
-
-            <div>
-                <strong>Email Notification</strong>
-                <p>Send alerts through email</p>
-            </div>
-
-            <label class="switch">
-
-                <input type="checkbox" id="emailNotification">
-
-                <span class="slider"></span>
-
-            </label>
-
-        </div>
+        
 
 
 
@@ -1896,113 +1813,10 @@
         </div>
 
     </div>
-
-
-
-    <!-- BACKUP -->
-    <div class="settings-card">
-
-        <h2>💾 Backup & Cleanup</h2>
-
-
-        <div class="setting-row">
-
-            <div>
-                <strong>Automatic Backup</strong>
-                <p>Automatically backup system data</p>
-            </div>
-
-            <label class="switch">
-
-                <input type="checkbox" id="automaticBackup">
-
-                <span class="slider"></span>
-
-            </label>
-
-        </div>
-
-
-
-        <div class="setting-row">
-
-            <div>
-                <strong>Auto Cleanup</strong>
-                <p>Automatically remove old data</p>
-            </div>
-
-            <label class="switch">
-
-                <input type="checkbox" id="autoCleanup">
-
-                <span class="slider"></span>
-
-            </label>
-
-        </div>
-
-
-
-        <div class="settings-grid">
-
-            <div class="setting-item">
-
-                <label>History Retention</label>
-
-                <select id="historyRetention">
-
-                    <option value="7">7 Days</option>
-                    <option value="30">30 Days</option>
-                    <option value="90">90 Days</option>
-                    <option value="180">180 Days</option>
-                    <option value="365">1 Year</option>
-
-                </select>
-
-            </div>
-
-
-
-            <div class="setting-item">
-
-                <label>Backup Retention</label>
-
-                <select id="backupRetention">
-
-                    <option value="7">7 Days</option>
-                    <option value="30">30 Days</option>
-                    <option value="90">90 Days</option>
-                    <option value="180">180 Days</option>
-                    <option value="365">1 Year</option>
-
-                </select>
-
-            </div>
-
-        </div>
-
-    </div>
-
-
-
-    <!-- BUTTONS -->
-    <div class="settings-actions">
-
-        <button type="button" id="resetSettingsBtn" class="reset-btn" onclick="resetSettings()">
-            Reset
-        </button>
-
-        <button type="button" id="saveSettingsBtn" class="save-btn" onclick="saveSettings()">
-            💾 Save Settings
-        </button>
-
-    </div>
-
-
-    <div id="saveMessage" class="save-message"></div>
-
-</div>
-
+      <div class="settings-footer" style="display:flex; justify-content:flex-end; gap:15px; margin-top:20px; padding-top:20px; border-top:1px solid #1e293b;">
+          <button class="btn secondary" onclick="resetSettings()">Reset to Defaults</button>
+          <button class="btn primary" onclick="saveSettings()">Save Changes</button>
+      </div>
     </section>
 
     </div>
@@ -2023,7 +1837,7 @@
     try {
 
         const response = await fetch(
-            "http://127.0.0.1:8000/api/auth/me",
+            "http://" + window.location.hostname + ":8000/api/auth/me",
             {
                 method: "GET",
                 headers: {
@@ -2070,7 +1884,13 @@
 })();
 </script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script src="script_v2.js"></script>
+<script src="config.js"></script><script src="script_v2.js?v=4"></script>
 
+<script type="text/javascript">
+function googleTranslateElementInit() {
+  new google.translate.TranslateElement({pageLanguage: 'en', includedLanguages: 'en,bn,hi', autoDisplay: false}, 'google_translate_element');
+}
+</script>
+<script type="text/javascript" src="https://translate.google.com/translate_a/element.js?cb=googleTranslateElementInit"></script>
 </body>
 </html>

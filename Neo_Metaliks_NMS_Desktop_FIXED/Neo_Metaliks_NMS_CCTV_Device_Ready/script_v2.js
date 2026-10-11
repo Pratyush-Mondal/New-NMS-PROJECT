@@ -70,56 +70,83 @@ window.addEventListener('hashchange', function () {
 const initialPage = window.location.hash.substring(1) || 'dashboard';
 openPage(document.getElementById(initialPage) ? initialPage : 'dashboard', false);
 
-function updateClock(){
-    const el=document.getElementById('clock');
-    if(!el) return;
-    let timezone='Asia/Kolkata';
-    try{
-        const saved=JSON.parse(localStorage.getItem('nmsSettings')||'{}');
-        timezone=saved.timezone||timezone;
-    }catch(e){}
-    try{
-        el.textContent=new Intl.DateTimeFormat('en-IN',{timeZone:timezone,hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).format(new Date());
-    }catch(e){
-        el.textContent=new Date().toLocaleTimeString('en-IN',{hour12:false});
-    }
+function updateClock() {
+    const el = document.getElementById('clock');
+    if (!el) return;
+    let timeFormat = '24';
+    try {
+        const saved = JSON.parse(localStorage.getItem('nmsSettings') || '{}');
+        timeFormat = saved.timeFormat || timeFormat;
+    } catch (e) { }
+    try {
+        el.textContent = new Date().toLocaleTimeString('en-IN', { hour12: (timeFormat === '12') });
+    } catch (e) { }
 }
-function clock(){updateClock()}
-setInterval(clock,1000);clock();
+function clock() { updateClock() }
+setInterval(clock, 1000); clock();
 
-function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');clearTimeout(window.tt);window.tt=setTimeout(()=>t.classList.remove('show'),2300)}
-function showToast(msg){ toast(msg); }
+function toast(msg) { const t = document.getElementById('toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(window.tt); window.tt = setTimeout(() => t.classList.remove('show'), 2300) }
+function showToast(msg) { toast(msg); }
 
-function refreshAll(){toast('Dashboard data refreshed successfully');drawChart()}
-function ackAlerts(){document.getElementById('dashAlerts').textContent='0';toast('All alerts acknowledged')}
-function pingTest(){toast('PING 10.10.0.1 — Reply: 1ms — 0% packet loss')}
+function refreshAll() { window.location.reload(); }
+function ackAlerts() { document.getElementById('dashAlerts').textContent = '0'; toast('All alerts acknowledged') }
+async function pingTest() {
+    const btn = document.querySelector('button[onclick="pingTest()"]');
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '&#9203; Pinging...';
+    }
+    
+    if (typeof toast === 'function') toast('Running ping test on all devices...');
+    
+    if (typeof backendDevices !== 'undefined' && Array.isArray(backendDevices)) {
+        const pingPromises = backendDevices.map(d => {
+            if (typeof pingDeviceFromFrontend === 'function') {
+                return pingDeviceFromFrontend(d.id, { silent: true }).catch(e => null);
+            }
+            return Promise.resolve();
+        });
+        await Promise.allSettled(pingPromises);
+    }
+    
+    if (typeof loadNetworkMap === 'function') {
+        await loadNetworkMap();
+    }
+    
+    if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = '&#9889; Run Ping Test';
+    }
+    
+    if (typeof toast === 'function') toast('Ping test completed successfully!');
+}
 
-let devices=[
-['SW-01','Core Switch','10.10.1.1','Data Center','Online','99.98%'],
-['SW-02','Access Switch','10.10.2.1','Admin Block','Online','99.94%'],
-['SW-04','Access Switch','10.10.4.1','Admin Block','Online','99.82%'],
-['SW-07','Access Switch','10.10.7.1','Production Block','Offline','96.20%'],
-['RTR-01','Gateway Router','10.10.0.1','Network Room','Online','99.99%'],
-['RTR-02','Backup Router','10.10.0.2','Data Center','Online','99.91%'],
-['AP-04','Access Point','10.10.20.14','Admin Block','Online','99.71%'],
-['AP-07','Access Point','10.10.20.17','Production Block','Online','98.90%'],
-['FW-01','Firewall','10.10.0.254','Data Center','Online','99.99%']
+let devices = [
+    ['SW-01', 'Core Switch', '10.10.1.1', 'Data Center', 'Online', '99.98%'],
+    ['SW-02', 'Access Switch', '10.10.2.1', 'Admin Block', 'Online', '99.94%'],
+    ['SW-04', 'Access Switch', '10.10.4.1', 'Admin Block', 'Online', '99.82%'],
+    ['SW-07', 'Access Switch', '10.10.7.1', 'Production Block', 'Offline', '96.20%'],
+    ['RTR-01', 'Gateway Router', '10.10.0.1', 'Network Room', 'Online', '99.99%'],
+    ['RTR-02', 'Backup Router', '10.10.0.2', 'Data Center', 'Online', '99.91%'],
+    ['AP-04', 'Access Point', '10.10.20.14', 'Admin Block', 'Online', '99.71%'],
+    ['AP-07', 'Access Point', '10.10.20.17', 'Production Block', 'Online', '98.90%'],
+    ['FW-01', 'Firewall', '10.10.0.254', 'Data Center', 'Online', '99.99%']
 ];
-function loadCustomDevices(){
-    try{
-        const saved=JSON.parse(localStorage.getItem('nmsCustomDevices') || '[]');
-        if(Array.isArray(saved)){
-            saved.forEach(d=>{
-                if(Array.isArray(d) && d.length >= 6 && !devices.some(x=>x[0]===d[0])) devices.push(d);
+function loadCustomDevices() {
+    try {
+        const saved = JSON.parse(localStorage.getItem('nmsCustomDevices') || '[]');
+        if (Array.isArray(saved)) {
+            saved.forEach(d => {
+                if (Array.isArray(d) && d.length >= 6 && !devices.some(x => x[0] === d[0])) devices.push(d);
             });
         }
-    }catch(error){ console.warn('Custom device data could not be loaded.', error); }
+    } catch (error) { console.warn('Custom device data could not be loaded.', error); }
 }
 
-function saveCustomDevices(){
-    const baseIds=new Set(['SW-01','SW-02','SW-04','SW-07','RTR-01','RTR-02','AP-04','AP-07','FW-01']);
-    const custom=devices.filter(d=>!baseIds.has(d[0]));
-    localStorage.setItem('nmsCustomDevices',JSON.stringify(custom));
+function saveCustomDevices() {
+    const baseIds = new Set(['SW-01', 'SW-02', 'SW-04', 'SW-07', 'RTR-01', 'RTR-02', 'AP-04', 'AP-07', 'FW-01']);
+    const custom = devices.filter(d => !baseIds.has(d[0]));
+    localStorage.setItem('nmsCustomDevices', JSON.stringify(custom));
 }
 
 // ==========================================
@@ -146,7 +173,7 @@ async function loadDevicesFromBackend() {
     try {
 
         const response = await fetch(
-            "http://127.0.0.1:8000/api/devices",
+            `${window.APP_CONFIG.API_BASE_URL}/api/devices?_t=${Date.now()}`,
             {
                 method: "GET",
 
@@ -253,17 +280,7 @@ function startDevicesFrontendAutoRefresh() {
     // Page open হলে একবার immediately load
     loadDevicesFromBackend();
 
-    // তারপর প্রতি 5 seconds-এ latest device status load
-    // devicesFrontendRefreshTimer = setInterval(
-    //     function () {
-    //         loadDevicesFromBackend();
-    //     },
-    //     5000
-    // );
-
-    console.log(
-        "✅ Devices frontend auto-refresh started."
-    );
+    console.log("✅ Devices frontend initial load complete. Auto-refresh DISABLED as per user request.");
 }
 
 document.addEventListener(
@@ -271,6 +288,7 @@ document.addEventListener(
     function () {
 
         startDevicesFrontendAutoRefresh();
+        startCCTVFrontendAutoRefresh();
 
     }
 );
@@ -279,6 +297,8 @@ document.addEventListener(
 function renderBackendDevices(
     list = backendDevices
 ) {
+    const dBadge = document.getElementById('sidebarDevicesCount');
+    if (dBadge && list === backendDevices) dBadge.textContent = backendDevices.length;
 
     const tbody =
         document.getElementById(
@@ -318,7 +338,7 @@ function renderBackendDevices(
     // ------------------------------------------
 
     tbody.innerHTML =
-        list.map(function(device) {
+        list.map(function (device) {
 
             const status =
                 String(
@@ -332,7 +352,7 @@ function renderBackendDevices(
 
             const uptime =
                 device.uptime_percent !== null &&
-                device.uptime_percent !== undefined
+                    device.uptime_percent !== undefined
                     ? `${Number(device.uptime_percent).toFixed(2)}%`
                     : "—";
 
@@ -343,7 +363,7 @@ function renderBackendDevices(
 
             const latency =
                 device.last_latency_ms !== null &&
-                device.last_latency_ms !== undefined
+                    device.last_latency_ms !== undefined
                     ? `${Number(device.last_latency_ms).toFixed(0)} ms`
                     : "—";
 
@@ -489,11 +509,11 @@ function renderBackendDevices(
                                 onclick="deleteDeviceFromFrontend(
                                     ${device.id},
                                     '${String(
-                                        device.device_code || ""
-                                    ).replace(
-                                        /'/g,
-                                        "\\'"
-                                    )}'
+                device.device_code || ""
+            ).replace(
+                /'/g,
+                "\\'"
+            )}'
                                 )">
 
                                 DELETE
@@ -512,35 +532,33 @@ function renderBackendDevices(
 
 function filterDevices() {
 
-    const searchBox =
-        document.getElementById(
-            "deviceSearch"
-        );
+    const searchBox = document.getElementById("deviceSearch");
+    const typeBox = document.getElementById("deviceTypeFilter");
+    const statusBox = document.getElementById("deviceStatusFilter");
 
-    const query =
-        searchBox
-            ? searchBox.value
-                .trim()
-                .toLowerCase()
-            : "";
+    const query = searchBox ? searchBox.value.trim().toLowerCase() : "";
+    const typeVal = typeBox ? typeBox.value : "All Types";
+    const statusVal = statusBox ? statusBox.value : "All Status";
 
-    const filtered =
-        backendDevices.filter(
-            function(device) {
+    const filtered = backendDevices.filter(function (device) {
+        // Search text filter
+        const matchesQuery = [
+            device.device_code,
+            device.device_name,
+            device.device_type,
+            device.ip_address,
+            device.location,
+            device.status
+        ].join(" ").toLowerCase().includes(query);
+        
+        // Type filter
+        const matchesType = (typeVal === "All Types") || (device.device_type === typeVal);
+        
+        // Status filter
+        const matchesStatus = (statusVal === "All Status") || (device.status === statusVal);
 
-                return [
-                    device.device_code,
-                    device.device_name,
-                    device.device_type,
-                    device.ip_address,
-                    device.location,
-                    device.status
-                ]
-                .join(" ")
-                .toLowerCase()
-                .includes(query);
-            }
-        );
+        return matchesQuery && matchesType && matchesStatus;
+    });
 
     renderBackendDevices(filtered);
 }
@@ -549,29 +567,29 @@ function filterDevices() {
 // Load database devices
 document.addEventListener(
     "DOMContentLoaded",
-    function() {
+    function () {
         loadDevicesFromBackend();
     }
 );
-const camNames=['Main Gate','Gate-2','Main Yard','Production Line-1','Production Line-2','Warehouse','Admin Lobby','Control Room','Parking-A','Parking-B','Raw Material','Dispatch','Canteen','Substation','Workshop','Boundary-N'];
-document.getElementById('cameraGrid').innerHTML=camNames.map((name,i)=>`<div class="camera ${i===10?'offline':''}"><div class="camera-feed">${i===10?'▧':'◉'}</div><div class="camera-info"><span>CAM-${String(i+1).padStart(2,'0')} · ${name}</span><span>${i===10?'OFFLINE':'LIVE'}</span></div></div>`).join('');
-function setCameraGrid(n){toast('Camera layout set to '+n+' × '+n)}
+const camNames = ['Main Gate', 'Gate-2', 'Main Yard', 'Production Line-1', 'Production Line-2', 'Warehouse', 'Admin Lobby', 'Control Room', 'Parking-A', 'Parking-B', 'Raw Material', 'Dispatch', 'Canteen', 'Substation', 'Workshop', 'Boundary-N'];
+document.getElementById('cameraGrid').innerHTML = camNames.map((name, i) => `<div class="camera ${i === 10 ? 'offline' : ''}"><div class="camera-feed">${i === 10 ? '▧' : '◉'}</div><div class="camera-info"><span>CAM-${String(i + 1).padStart(2, '0')} · ${name}</span><span>${i === 10 ? 'OFFLINE' : 'LIVE'}</span></div></div>`).join('');
+function setCameraGrid(n) { toast('Camera layout set to ' + n + ' × ' + n) }
 
 
 
-function drawChart(){
- const c=document.getElementById('chart');if(!c)return;
- const r=c.getBoundingClientRect(),d=devicePixelRatio||1,w=r.width,h=r.height;
- c.width=w*d;c.height=h*d;const x=c.getContext('2d');x.scale(d,d);x.clearRect(0,0,w,h);
- x.strokeStyle='#1a2e40';x.lineWidth=1;
- for(let y=15;y<h;y+=42){x.beginPath();x.moveTo(0,y);x.lineTo(w,y);x.stroke()}
- const vals=[31,36,33,45,41,52,49,61,56,64,58,67,62,71,65,60,54,58,49,52,46,50,43,38];
- x.beginPath();vals.forEach((v,i)=>{let px=i*w/(vals.length-1),py=h-14-v/80*(h-30);i?x.lineTo(px,py):x.moveTo(px,py)});
- x.strokeStyle='#31a9ef';x.lineWidth=2;x.stroke();
- x.lineTo(w,h);x.lineTo(0,h);x.closePath();x.fillStyle='rgba(49,169,239,.08)';x.fill();
+function drawChart() {
+    const c = document.getElementById('chart'); if (!c) return;
+    const r = c.getBoundingClientRect(), d = devicePixelRatio || 1, w = r.width, h = r.height;
+    c.width = w * d; c.height = h * d; const x = c.getContext('2d'); x.scale(d, d); x.clearRect(0, 0, w, h);
+    x.strokeStyle = '#1a2e40'; x.lineWidth = 1;
+    for (let y = 15; y < h; y += 42) { x.beginPath(); x.moveTo(0, y); x.lineTo(w, y); x.stroke() }
+    const vals = [31, 36, 33, 45, 41, 52, 49, 61, 56, 64, 58, 67, 62, 71, 65, 60, 54, 58, 49, 52, 46, 50, 43, 38];
+    x.beginPath(); vals.forEach((v, i) => { let px = i * w / (vals.length - 1), py = h - 14 - v / 80 * (h - 30); i ? x.lineTo(px, py) : x.moveTo(px, py) });
+    x.strokeStyle = '#31a9ef'; x.lineWidth = 2; x.stroke();
+    x.lineTo(w, h); x.lineTo(0, h); x.closePath(); x.fillStyle = 'rgba(49,169,239,.08)'; x.fill();
 }
-window.addEventListener('resize',drawChart);setTimeout(drawChart,100);
-document.getElementById('menuBtn').onclick=()=>document.getElementById('sidebar').classList.toggle('open');
+window.addEventListener('resize', drawChart); setTimeout(drawChart, 100);
+document.getElementById('menuBtn').onclick = () => document.getElementById('sidebar').classList.toggle('open');
 /* =========================================================
    ADMIN LOGOUT
 ========================================================= */
@@ -643,7 +661,7 @@ function adminLogout() {
        REDIRECT TO LOGIN
     ----------------------------------------- */
 
-    setTimeout(function() {
+    setTimeout(function () {
 
         window.location.href = "login.html";
 
@@ -734,7 +752,7 @@ async function loadAdminProfileData() {
     try {
 
         const response = await fetch(
-            "http://127.0.0.1:8000/api/auth/me",
+            window.APP_CONFIG.API_BASE_URL + "/api/auth/me",
             {
                 method: "GET",
                 headers: {
@@ -777,18 +795,18 @@ async function loadAdminProfileData() {
             department,
             location
         );
-const savedProfileImage =
-    localStorage.getItem(
-        "admin_profile_image"
-    );
+        const savedProfileImage =
+            localStorage.getItem(
+                "admin_profile_image"
+            );
 
-if (savedProfileImage) {
+        if (savedProfileImage) {
 
-    setProfileImage(
-        API_BASE_URL +
-        savedProfileImage
-    );
-}
+            setProfileImage(
+                API_BASE_URL +
+                savedProfileImage
+            );
+        }
     } catch (error) {
 
         console.error(
@@ -868,7 +886,7 @@ function bindAdminProfileForm() {
             }
 
             const response = await fetch(
-                "http://127.0.0.1:8000/api/auth/profile",
+                window.APP_CONFIG.API_BASE_URL + "/api/auth/profile",
                 {
                     method: "PUT",
 
@@ -898,18 +916,18 @@ function bindAdminProfileForm() {
             }
 
             const admin = data.admin;
-if (admin.profile_image) {
+            if (admin.profile_image) {
 
-    localStorage.setItem(
-        "admin_profile_image",
-        admin.profile_image
-    );
+                localStorage.setItem(
+                    "admin_profile_image",
+                    admin.profile_image
+                );
 
-    setProfileImage(
-        API_BASE_URL +
-        admin.profile_image
-    );
-}
+                setProfileImage(
+                    API_BASE_URL +
+                    admin.profile_image
+                );
+            }
             // Update browser storage
             localStorage.setItem(
                 "admin_id",
@@ -1033,7 +1051,7 @@ window.cancelProfileEdit = cancelProfileEdit;
 const profileImageInput =
     document.getElementById("profileImageInput");
 
-const API_BASE_URL = "http://127.0.0.1:8000";
+const API_BASE_URL = window.APP_CONFIG.API_BASE_URL;
 
 
 function setProfileImage(imageUrl) {
@@ -1042,13 +1060,20 @@ function setProfileImage(imageUrl) {
         return;
     }
 
-    [
-        "profileAvatarLarge",
-        "editProfileAvatar"
-    ].forEach(function (id) {
+    const elementsToUpdate = [];
+    
+    // Header Avatar
+    const headerAvatar = document.querySelector("#adminButton .admin-avatar");
+    if (headerAvatar) elementsToUpdate.push(headerAvatar);
+    
+    // Profile Page Avatars
+    const largeAvatar = document.getElementById("profileAvatarLarge");
+    if (largeAvatar) elementsToUpdate.push(largeAvatar);
+    
+    const editAvatar = document.getElementById("editProfileAvatar");
+    if (editAvatar) elementsToUpdate.push(editAvatar);
 
-        const element =
-            document.getElementById(id);
+    elementsToUpdate.forEach(function (element) {
 
         if (!element) {
             return;
@@ -1245,7 +1270,7 @@ if (profileImageInput) {
 const defaultSettings = {
     theme: "dark",
     language: "english",
-    timezone: "Asia/Kolkata",
+    timeFormat: "24",
 
     dashboardRefresh: "30",
 
@@ -1256,17 +1281,7 @@ const defaultSettings = {
     cameraInterval: "30",
 
     alert: true,
-    autoRecovery: true,
-    autoRestart: false,
-
-    emailNotification: false,
     soundNotification: true,
-
-    automaticBackup: true,
-    autoCleanup: true,
-
-    historyRetention: "30",
-    backupRetention: "30"
 };
 
 
@@ -1304,8 +1319,8 @@ function loadSettings() {
     if (!get("theme")) return;
     get("theme").value = settings.theme || defaultSettings.theme;
     get("language").value = settings.language || defaultSettings.language;
-    get("timezone").value = settings.timezone || defaultSettings.timezone;
-    get("dashboardRefresh").value = settings.dashboardRefresh || defaultSettings.dashboardRefresh;
+    if(get("timeFormat")) get("timeFormat").value = settings.timeFormat || defaultSettings.timeFormat;
+    
 
 
     // NETWORK
@@ -1317,48 +1332,30 @@ function loadSettings() {
 
 
     // CAMERA
-get("cameraMonitoring").checked =
-    settings.cameraMonitoring ?? defaultSettings.cameraMonitoring;
+    get("cameraMonitoring").checked =
+        settings.cameraMonitoring ?? defaultSettings.cameraMonitoring;
 
-get("cameraInterval").value =
-    settings.cameraInterval || defaultSettings.cameraInterval;
+    get("cameraInterval").value =
+        settings.cameraInterval || defaultSettings.cameraInterval;
 
-get("cameraRetryInterval").value =
-    settings.cameraRetryInterval || 120;
+    get("cameraRetryInterval").value =
+        settings.cameraRetryInterval || 120;
 
     // ALERT
     get("alert").checked =
         settings.alert ?? defaultSettings.alert;
 
-    get("autoRecovery").checked =
-        settings.autoRecovery ?? defaultSettings.autoRecovery;
-
-    get("autoRestart").checked =
-        settings.autoRestart ?? defaultSettings.autoRestart;
-
 
     // NOTIFICATION
-    get("emailNotification").checked =
-        settings.emailNotification ?? defaultSettings.emailNotification;
 
     get("soundNotification").checked =
         settings.soundNotification ?? defaultSettings.soundNotification;
 
 
     // BACKUP
-    get("automaticBackup").checked =
-        settings.automaticBackup ?? defaultSettings.automaticBackup;
-
-    get("autoCleanup").checked =
-        settings.autoCleanup ?? defaultSettings.autoCleanup;
 
 
     // RETENTION
-    get("historyRetention").value =
-        settings.historyRetention || defaultSettings.historyRetention;
-
-    get("backupRetention").value =
-        settings.backupRetention || defaultSettings.backupRetention;
 
 
     // APPLY THEME
@@ -1379,20 +1376,7 @@ get("cameraRetryInterval").value =
 // ------------------------------------------
 
 function persistCurrentSettings(showMsg = false) {
-    if (!get("theme")) return;
-    const settings = {
-        theme: get("theme").value, language: get("language").value, timezone: get("timezone").value,
-        dashboardRefresh: get("dashboardRefresh").value,
-        networkMonitoring: get("networkMonitoring").checked, networkInterval: get("networkInterval").value,
-        cameraMonitoring: get("cameraMonitoring").checked, cameraInterval: get("cameraInterval").value,
-        alert: get("alert").checked, autoRecovery: get("autoRecovery").checked, autoRestart: get("autoRestart").checked,
-        emailNotification: get("emailNotification").checked, soundNotification: get("soundNotification").checked,
-        automaticBackup: get("automaticBackup").checked, autoCleanup: get("autoCleanup").checked,
-        historyRetention: get("historyRetention").value, backupRetention: get("backupRetention").value
-    };
-    localStorage.setItem("nmsSettings", JSON.stringify(settings));
-    updateClock();
-    if (showMsg) showMessage("✓ Setting updated");
+    saveSettings();
 }
 
 async function saveSettings() {
@@ -1403,11 +1387,7 @@ async function saveSettings() {
 
         language: get("language").value,
 
-        timezone: get("timezone").value,
-
-        dashboardRefresh:
-            get("dashboardRefresh").value,
-
+        timeFormat: get("timeFormat") ? get("timeFormat").value : "24",
 
         networkMonitoring:
             get("networkMonitoring").checked,
@@ -1420,41 +1400,17 @@ async function saveSettings() {
             get("cameraMonitoring").checked,
 
         cameraInterval:
-    get("cameraInterval").value,
+            get("cameraInterval").value,
 
-cameraRetryInterval:
-    parseInt(
-        document.getElementById("cameraRetryInterval").value
-    ),
+        cameraRetryInterval:
+            parseInt(
+                document.getElementById("cameraRetryInterval").value
+            ),
         alert:
             get("alert").checked,
 
-        autoRecovery:
-            get("autoRecovery").checked,
-
-        autoRestart:
-            get("autoRestart").checked,
-
-
-        emailNotification:
-            get("emailNotification").checked,
-
         soundNotification:
             get("soundNotification").checked,
-
-
-        automaticBackup:
-            get("automaticBackup").checked,
-
-        autoCleanup:
-            get("autoCleanup").checked,
-
-
-        historyRetention:
-            get("historyRetention").value,
-
-        backupRetention:
-            get("backupRetention").value
     };
 
 
@@ -1465,7 +1421,7 @@ cameraRetryInterval:
     );
 
 
-        // ==========================================
+    // ==========================================
     // SYNC CCTV SETTINGS WITH BACKEND
     // ==========================================
 
@@ -1479,7 +1435,7 @@ cameraRetryInterval:
     try {
 
         const cameraResponse = await fetch(
-            "http://127.0.0.1:8000/api/settings/camera",
+            window.APP_CONFIG.API_BASE_URL + "/api/settings/camera",
             {
                 method: "PUT",
                 headers: {
@@ -1528,9 +1484,14 @@ cameraRetryInterval:
 
     applyLanguage(settings.language);
     updateClock();
-    
+
+    // RESTART FRONTEND TIMERS
+    if (typeof startAutoMonitor === 'function') startAutoMonitor();
+    if (typeof startBackgroundPinging === 'function') startBackgroundPinging();
+
     // SHOW MESSAGE
-    syncNetworkSettingsToBackend(false); 
+    syncNetworkSettingsToBackend(false);
+    syncGlobalSettingsToBackend(settings);
     showMessage("✓ Settings saved successfully");
 
 
@@ -1544,128 +1505,25 @@ cameraRetryInterval:
 // ------------------------------------------
 
 function resetSettings() {
+    const confirmReset = confirm("Are you sure you want to reset all settings?");
+    if (!confirmReset) return;
 
-    const confirmReset = confirm(
-        "Are you sure you want to reset all settings?"
-    );
+    // Apply defaults to UI
+    if(get("theme")) get("theme").value = defaultSettings.theme;
+    if(get("language")) get("language").value = defaultSettings.language;
+    if(get("timeFormat")) get("timeFormat").value = defaultSettings.timeFormat;
+    if(get("networkMonitoring")) get("networkMonitoring").checked = defaultSettings.networkMonitoring;
+    if(get("networkInterval")) get("networkInterval").value = defaultSettings.networkInterval;
+    if(get("cameraMonitoring")) get("cameraMonitoring").checked = defaultSettings.cameraMonitoring;
+    if(get("cameraInterval")) get("cameraInterval").value = defaultSettings.cameraInterval;
+    if(get("cameraRetryInterval")) get("cameraRetryInterval").value = defaultSettings.cameraRetryInterval;
+    if(get("alert")) get("alert").checked = defaultSettings.alert;
+    if(get("soundNotification")) get("soundNotification").checked = defaultSettings.soundNotification;
 
-
-    if (!confirmReset) {
-        return;
-    }
-
-
-    localStorage.setItem(
-        "nmsSettings",
-        JSON.stringify(defaultSettings)
-    );
-
-
-    loadSettings();
-    loadCameraSettingsFromBackend();
-
-    // =========================================================
-// LOAD CCTV SETTINGS FROM BACKEND
-// =========================================================
-
-async function loadCameraSettingsFromBackend() {
-
-    const token = localStorage.getItem("access_token");
-
-    if (!token) {
-        return;
-    }
-
-    try {
-
-        const response = await fetch(
-            "http://127.0.0.1:8000/api/settings/camera",
-            {
-                method: "GET",
-                headers: {
-                    "Authorization": "Bearer " + token
-                }
-            }
-        );
-
-        if (!response.ok) {
-            throw new Error("CCTV settings request failed.");
-        }
-
-        const data = await response.json();
-
-        if (!data.success) {
-            throw new Error(
-                data.detail ||
-                data.message ||
-                "CCTV settings load failed."
-            );
-        }
-
-        // ------------------------------------------
-        // UPDATE SETTINGS UI
-        // ------------------------------------------
-
-        if (get("cameraMonitoring")) {
-            get("cameraMonitoring").checked =
-                data.camera_monitoring;
-        }
-
-        if (get("cameraInterval")) {
-            get("cameraInterval").value =
-                String(data.camera_interval);
-        }
-
-        if (get("cameraRetryInterval")) {
-            get("cameraRetryInterval").value =
-                String(data.camera_retry_interval);
-        }
-
-        // ------------------------------------------
-        // UPDATE LOCAL STORAGE TOO
-        // ------------------------------------------
-
-        let savedSettings = {};
-
-        try {
-            savedSettings = JSON.parse(
-                localStorage.getItem("nmsSettings") || "{}"
-            );
-        } catch (error) {
-            savedSettings = {};
-        }
-
-        savedSettings.cameraMonitoring =
-            data.camera_monitoring;
-
-        savedSettings.cameraInterval =
-            data.camera_interval;
-
-        savedSettings.cameraRetryInterval =
-            data.camera_retry_interval;
-
-        localStorage.setItem(
-            "nmsSettings",
-            JSON.stringify(savedSettings)
-        );
-
-        console.log(
-            "✅ CCTV settings loaded from MySQL:",
-            data
-        );
-
-    } catch (error) {
-
-        console.error(
-            "❌ CCTV backend settings load error:",
-            error
-        );
-    }
+    saveSettings();
+    showMessage("Settings reset to defaults and saved to backend");
 }
 
-
-    showMessage("✓ Settings reset successfully");
-}
 
 
 
@@ -1697,30 +1555,28 @@ function applyTheme(theme) {
 // ------------------------------------------
 
 function applyLanguage(language) {
-
-    console.log(
-        "Selected Language:",
-        language
-    );
-
-    // এখানে পরে পুরো UI language change
-    // করা যাবে।
-
+    // We use Google Translate to handle entire site translation seamlessly.
+    // Set the translation cookie.
+    const currentCookie = document.cookie.split('; ').find(row => row.startsWith('googtrans='));
+    const targetCookie = 'googtrans=/en/' + language;
+    
+    if (language === 'en') {
+        if (currentCookie) {
+            document.cookie = "googtrans=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
+            document.cookie = "googtrans=; expires=Thu, 01 Jan 1970 00:00:00 UTC; domain=." + document.domain + "; path=/;";
+            window.location.reload();
+        }
+    } else {
+        if (currentCookie !== targetCookie) {
+            document.cookie = targetCookie + "; path=/;";
+            document.cookie = targetCookie + "; domain=." + document.domain + "; path=/;";
+            window.location.reload();
+        }
+    }
 }
 
 // ==========================================
-// TIMEZONE CHANGE
-// ==========================================
 
-get("timezone")?.addEventListener("change", function() {
-    const selectedTimezone = this.value;
-    let settings = { ...defaultSettings };
-    try { settings = { ...settings, ...(JSON.parse(localStorage.getItem("nmsSettings") || "{}")) }; } catch (e) {}
-    settings.timezone = selectedTimezone;
-    localStorage.setItem("nmsSettings", JSON.stringify(settings));
-    updateClock();
-    showMessage("🌍 Timezone changed successfully");
-});
 
 // ------------------------------------------
 // SOUND
@@ -1811,28 +1667,11 @@ function testSound() {
 // ------------------------------------------
 
 function showMessage(message) {
-
-    const box =
-        get("saveMessage");
-
-
-    if (!box) {
-        alert(message);
-        return;
+    if (typeof toast === 'function') {
+        toast(message.replace(/[""]/g, ''));
+    } else {
+        console.log(message);
     }
-
-
-    box.innerText = message;
-
-
-    box.classList.add("show");
-
-
-    setTimeout(function () {
-
-        box.classList.remove("show");
-
-    }, 2500);
 }
 
 
@@ -1915,50 +1754,17 @@ get("alert")
 
 
 // ------------------------------------------
-// AUTO RECOVERY
-// ------------------------------------------
 
-get("autoRecovery")
-    ?.addEventListener("change", function () {
-
-        toggleStatus(
-            "autoRecovery",
-            "Auto Recovery"
-        );
-
-    });
 
 
 
 // ------------------------------------------
-// AUTO RESTART
-// ------------------------------------------
 
-get("autoRestart")
-    ?.addEventListener("change", function () {
-
-        toggleStatus(
-            "autoRestart",
-            "Auto Restart"
-        );
-
-    });
 
 
 
 // ------------------------------------------
-// EMAIL NOTIFICATION
-// ------------------------------------------
 
-get("emailNotification")
-    ?.addEventListener("change", function () {
-
-        toggleStatus(
-            "emailNotification",
-            "Email Notification"
-        );
-
-    });
 
 
 
@@ -1997,15 +1803,7 @@ get("soundNotification")
 // AUTOMATIC BACKUP
 // ------------------------------------------
 
-get("automaticBackup")
-    ?.addEventListener("change", function () {
 
-        toggleStatus(
-            "automaticBackup",
-            "Automatic Backup"
-        );
-
-    });
 
 
 
@@ -2013,15 +1811,7 @@ get("automaticBackup")
 // AUTO CLEANUP
 // ------------------------------------------
 
-get("autoCleanup")
-    ?.addEventListener("change", function () {
 
-        toggleStatus(
-            "autoCleanup",
-            "Auto Cleanup"
-        );
-
-    });
 
 
 
@@ -2070,7 +1860,7 @@ async function syncNetworkSettingsToBackend(
 
         const response =
             await fetch(
-                "http://127.0.0.1:8000/api/settings/network",
+                window.APP_CONFIG.API_BASE_URL + "/api/settings/network",
                 {
                     method: "PUT",
 
@@ -2130,27 +1920,38 @@ async function syncNetworkSettingsToBackend(
     }
 }
 
+async function syncGlobalSettingsToBackend(settings) {
+    const token = localStorage.getItem("access_token");
+    if (!token) return;
+
+    try {
+        const payload = {
+            alert: !!settings.alert,
+            soundNotification: !!settings.soundNotification,
+        };
+
+        const response = await fetch(window.APP_CONFIG.API_BASE_URL + "/api/settings/global", {
+            method: "PUT",
+            headers: {
+                "Content-Type": "application/json",
+                "Authorization": "Bearer " + token
+            },
+            body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+            console.error("Global settings sync failed:", response.status);
+        } else {
+            console.log("✅ Global settings synced to backend.");
+        }
+    } catch (error) {
+        console.error("Global settings sync error:", error);
+    }
+}
 
 // ------------------------------------------
-// DASHBOARD REFRESH CHANGE
-// ------------------------------------------
 
-get("dashboardRefresh")
-    ?.addEventListener("change", function () {
 
-        console.log(
-            "Dashboard Refresh:",
-            this.value + " seconds"
-        );
-
-        persistCurrentSettings();
-        
-        syncNetworkSettingsToBackend(
-            true
-         );
-       }
-     );
-    
 
 
 
@@ -2210,7 +2011,16 @@ get("language")
 
     });
 
+// ------------------------------------------
+// TIME FORMAT CHANGE
+// ------------------------------------------
 
+get("timeFormat")
+    ?.addEventListener("change", function () {
+        persistCurrentSettings();
+        updateClock();
+        showMessage("Time format changed");
+    });
 
 // ------------------------------------------
 // SAVE BUTTON KEYBOARD SHORTCUT
@@ -2321,9 +2131,9 @@ try {
         error
     );
 }
-function openDesktopModal(){ document.getElementById('desktopModal')?.classList.add('show'); }
-function closeDesktopModal(){ document.getElementById('desktopModal')?.classList.remove('show'); }
-function closeDesktopView(){ document.getElementById('desktopViewModal')?.classList.remove('show'); }
+function openDesktopModal() { document.getElementById('desktopModal')?.classList.add('show'); }
+function closeDesktopModal() { document.getElementById('desktopModal')?.classList.remove('show'); }
+function closeDesktopView() { document.getElementById('desktopViewModal')?.classList.remove('show'); }
 
 function viewDesktop(desktopId) {
 
@@ -2355,13 +2165,13 @@ function viewDesktop(desktopId) {
 
     const latency =
         device.last_latency_ms !== null &&
-        device.last_latency_ms !== undefined
+            device.last_latency_ms !== undefined
             ? `${device.last_latency_ms} ms`
             : '—';
 
     const uptime =
         device.uptime_percent !== null &&
-        device.uptime_percent !== undefined
+            device.uptime_percent !== undefined
             ? `${device.uptime_percent}%`
             : '0%';
 
@@ -2502,7 +2312,7 @@ async function addDesktopFromForm(event) {
     if (
         desktopData.some(function (d) {
             return String(d.id).toLowerCase() ===
-                   String(values.id).toLowerCase();
+                String(values.id).toLowerCase();
         })
     ) {
         alert('Desktop ID already exists.');
@@ -2732,7 +2542,7 @@ async function addDesktopFromForm(event) {
         );
     }
 }
-function refreshDesktopSummary(){
+function refreshDesktopSummary() {
     const total = desktopData.length;
     const online = desktopData.filter(d => String(d.status).toLowerCase() === 'online').length;
     const offline = desktopData.filter(d => String(d.status).toLowerCase() === 'offline').length;
@@ -2743,15 +2553,15 @@ function refreshDesktopSummary(){
     }).length;
 
     const cards = document.querySelectorAll('#desktops .stats-grid .stat-card strong');
-    if(cards[0]) cards[0].textContent = total;
-    if(cards[1]) cards[1].textContent = online;
-    if(cards[2]) cards[2].textContent = offline;
-    if(cards[3]) cards[3].textContent = issues;
+    if (cards[0]) cards[0].textContent = total;
+    if (cards[1]) cards[1].textContent = online;
+    if (cards[2]) cards[2].textContent = offline;
+    if (cards[3]) cards[3].textContent = issues;
 }
 
-function renderDesktopRows(list = desktopData){
+function renderDesktopRows(list = desktopData) {
     const tbody = document.querySelector('#desktops table tbody');
-    if(!tbody) return;
+    if (!tbody) return;
     tbody.innerHTML = list.map(d => `
         <tr>
             <td><strong>${d.id}</strong></td>
@@ -2824,7 +2634,7 @@ async function deleteDesktopFromFrontend(
         toast("Deleting desktop...");
 
         const response = await fetch(
-            `http://127.0.0.1:8000/api/desktops/${desktopId}`,
+            `${window.APP_CONFIG.API_BASE_URL}/api/desktops/${desktopId}`,
             {
                 method: "DELETE",
 
@@ -2905,31 +2715,31 @@ window.deleteDesktopFromFrontend =
     deleteDesktopFromFrontend;
 
 
-document.addEventListener('DOMContentLoaded',function(){
+document.addEventListener('DOMContentLoaded', function () {
     // Hide modal by default even if another stylesheet changes .show.
     document.getElementById('desktopModal')?.classList.remove('show');
     document.getElementById('desktopViewModal')?.classList.remove('show');
 
-    document.getElementById('addDesktopBtn')?.addEventListener('click',openDesktopModal);
-    document.getElementById('closeDesktopModal')?.addEventListener('click',closeDesktopModal);
-    document.getElementById('cancelDesktopBtn')?.addEventListener('click',closeDesktopModal);
+    document.getElementById('addDesktopBtn')?.addEventListener('click', openDesktopModal);
+    document.getElementById('closeDesktopModal')?.addEventListener('click', closeDesktopModal);
+    document.getElementById('cancelDesktopBtn')?.addEventListener('click', closeDesktopModal);
     document.getElementById('desktopForm')?.addEventListener(
-    'submit',
-    addDesktopFromForm
-    );  
- document.getElementById('desktopRefreshBtn')?.addEventListener(
-    'click',
-    refreshDesktopPage
-);
-    document.querySelectorAll('#desktopModal,#desktopViewModal').forEach(modal=>{
-        modal.addEventListener('click',e=>{ if(e.target===modal) modal.classList.remove('show'); });
+        'submit',
+        addDesktopFromForm
+    );
+    document.getElementById('desktopRefreshBtn')?.addEventListener(
+        'click',
+        refreshDesktopPage
+    );
+    document.querySelectorAll('#desktopModal,#desktopViewModal').forEach(modal => {
+        modal.addEventListener('click', e => { if (e.target === modal) modal.classList.remove('show'); });
     });
 
     const search = document.querySelector('#desktops .table-search');
-    search?.addEventListener('input', function(){
+    search?.addEventListener('input', function () {
         const q = this.value.trim().toLowerCase();
         const filtered = desktopData.filter(d =>
-            [d.id,d.department,d.ip,d.os,d.cpu,d.ram,d.status].join(' ').toLowerCase().includes(q)
+            [d.id, d.department, d.ip, d.os, d.cpu, d.ram, d.status].join(' ').toLowerCase().includes(q)
         );
         renderDesktopRows(filtered);
     });
@@ -3071,44 +2881,17 @@ async function refreshDesktopData() {
         );
 
         /*
-         * IMPORTANT:
-         * Monitoring OFF হলে কখনো desktop দেখাবে না.
+         * Filter display based on monitoring state
          */
         if (!desktopMonitoringEnabled) {
-
             renderDesktopRows([]);
-
-            refreshDesktopSummary();
-
-            return;
-        }
-
-        /*
-         * Monitoring ON হলে selected location
-         * অনুযায়ী desktop দেখাবে.
-         */
-        const selectedLocation =
-            String(
-                selectedDesktopMonitoringLocation || ''
-            )
-                .trim()
-                .toLowerCase();
-
-        const filteredDesktops =
-            desktopData.filter(function (desktop) {
-
-                return String(
-                    desktop.location || ''
-                )
-                    .trim()
-                    .toLowerCase() ===
-                    selectedLocation;
-
+        } else {
+            const selectedLocation = String(selectedDesktopMonitoringLocation || '').trim().toLowerCase();
+            const filteredDesktops = desktopData.filter(function (desktop) {
+                return String(desktop.location || '').trim().toLowerCase() === selectedLocation;
             });
-
-        renderDesktopRows(
-            filteredDesktops
-        );
+            renderDesktopRows(filteredDesktops);
+        }
 
         refreshDesktopSummary();
 
@@ -3136,41 +2919,41 @@ async function refreshDesktopData() {
    Safe frontend layer; ready to replace with Flask APIs later.
 ========================================================= */
 
-function openNmsModal(id){
-    const modal=document.getElementById(id);
-    if(!modal) return;
+function openNmsModal(id) {
+    const modal = document.getElementById(id);
+    if (!modal) return;
     modal.classList.add('show');
-    modal.setAttribute('aria-hidden','false');
+    modal.setAttribute('aria-hidden', 'false');
 }
 
-function closeNmsModal(id){
-    const modal=document.getElementById(id);
-    if(!modal) return;
+function closeNmsModal(id) {
+    const modal = document.getElementById(id);
+    if (!modal) return;
     modal.classList.remove('show');
-    modal.setAttribute('aria-hidden','true');
+    modal.setAttribute('aria-hidden', 'true');
 }
 
-function validateIpAddress(ip){
-    const parts=String(ip).trim().split('.');
-    return parts.length===4 && parts.every(part => /^\d+$/.test(part) && Number(part)>=0 && Number(part)<=255);
+function validateIpAddress(ip) {
+    const parts = String(ip).trim().split('.');
+    return parts.length === 4 && parts.every(part => /^\d+$/.test(part) && Number(part) >= 0 && Number(part) <= 255);
 }
 
-function bindDeviceManagement(){
-    const addBtn=document.getElementById('addDeviceBtn');
-    const form=document.getElementById('deviceForm');
-    const modal=document.getElementById('deviceModal');
-    if(addBtn && !addBtn.dataset.bound){
-        addBtn.dataset.bound='true';
-        addBtn.addEventListener('click',()=>{
+function bindDeviceManagement() {
+    const addBtn = document.getElementById('addDeviceBtn');
+    const form = document.getElementById('deviceForm');
+    const modal = document.getElementById('deviceModal');
+    if (addBtn && !addBtn.dataset.bound) {
+        addBtn.dataset.bound = 'true';
+        addBtn.addEventListener('click', () => {
             form?.reset();
-            const uptime=document.getElementById('newDeviceUptime');
-            if(uptime) uptime.value='100%';
+            const uptime = document.getElementById('newDeviceUptime');
+            if (uptime) uptime.value = '100%';
             openNmsModal('deviceModal');
         });
     }
-    document.getElementById('closeDeviceModal')?.addEventListener('click',()=>closeNmsModal('deviceModal'));
-    document.getElementById('cancelDeviceBtn')?.addEventListener('click',()=>closeNmsModal('deviceModal'));
-    modal?.addEventListener('click',e=>{if(e.target===modal) closeNmsModal('deviceModal');});
+    document.getElementById('closeDeviceModal')?.addEventListener('click', () => closeNmsModal('deviceModal'));
+    document.getElementById('cancelDeviceBtn')?.addEventListener('click', () => closeNmsModal('deviceModal'));
+    modal?.addEventListener('click', e => { if (e.target === modal) closeNmsModal('deviceModal'); });
 }
 // ==========================================
 // DEVICES - REAL PAGE REFRESH
@@ -3271,28 +3054,28 @@ document.addEventListener(
 );
 
 
-function getStoredCameras(){
-    try{
-        const saved=JSON.parse(localStorage.getItem('nmsCustomCameras') || '[]');
+function getStoredCameras() {
+    try {
+        const saved = JSON.parse(localStorage.getItem('nmsCustomCameras') || '[]');
         return Array.isArray(saved) ? saved : [];
-    }catch(error){
+    } catch (error) {
         console.warn('Custom CCTV data could not be loaded.', error);
         return [];
     }
 }
 
-function saveStoredCameras(list){
-    localStorage.setItem('nmsCustomCameras',JSON.stringify(list));
+function saveStoredCameras(list) {
+    localStorage.setItem('nmsCustomCameras', JSON.stringify(list));
 }
 
-function createCameraCard(camera){
-    const offline=String(camera.status).toUpperCase()==='OFFLINE';
-    const id=String(camera.id).replace(/"/g,'&quot;');
-    const name=String(camera.name).replace(/</g,'&lt;').replace(/>/g,'&gt;');
-    const location=String(camera.location || '').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-    return `<div class="camera ${offline?'offline':''}" data-custom-camera-id="${id}">
-        <div class="camera-feed">${offline?'▧':'◉'}</div>
-        <div class="camera-info"><span>${id} · ${name}</span><span>${offline?'OFFLINE':'LIVE'}</span></div>
+function createCameraCard(camera) {
+    const offline = String(camera.status).toUpperCase() === 'OFFLINE';
+    const id = String(camera.id).replace(/"/g, '&quot;');
+    const name = String(camera.name).replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const location = String(camera.location || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    return `<div class="camera ${offline ? 'offline' : ''}" data-custom-camera-id="${id}">
+        <div class="camera-feed">${offline ? '▧' : '◉'}</div>
+        <div class="camera-info"><span>${id} · ${name}</span><span>${offline ? 'OFFLINE' : 'LIVE'}</span></div>
         <div class="custom-camera-meta">${location}</div>
     </div>`;
 }
@@ -3321,7 +3104,7 @@ async function loadCamerasFromBackend() {
     try {
 
         const response = await fetch(
-            "http://127.0.0.1:8000/api/cameras",
+            `${window.APP_CONFIG.API_BASE_URL}/api/cameras?_t=${Date.now()}`,
             {
                 method: "GET",
 
@@ -3415,9 +3198,9 @@ function startCCTVFrontendAutoRefresh() {
         cctvFrontendRefreshTimer = null;
     }
 
-    console.log(
-        "⏸ CCTV page auto-refresh disabled."
-    );
+    // Fetch once on init, no timer
+    loadCamerasFromBackend();
+    console.log("✅ CCTV frontend initial load complete. Auto-refresh DISABLED as per user request.");
 }
 
 
@@ -3439,7 +3222,7 @@ function updateCameraDashboardStats(list = backendCameras) {
     let offline = 0;
     let unknown = 0;
 
-    list.forEach(function(camera) {
+    list.forEach(function (camera) {
 
         const status = String(
             camera.status || "Unknown"
@@ -3594,7 +3377,7 @@ function filterCamerasByIp() {
 
     let matched = 0;
 
-    cameraCards.forEach(function(card) {
+    cameraCards.forEach(function (card) {
 
         const cameraId =
             String(
@@ -3602,7 +3385,7 @@ function filterCamerasByIp() {
             );
 
         const camera =
-            backendCameras.find(function(item) {
+            backendCameras.find(function (item) {
 
                 return String(item.id) === cameraId;
 
@@ -3619,8 +3402,8 @@ function filterCamerasByIp() {
             String(
                 camera.ip_address || ""
             )
-            .trim()
-            .toLowerCase();
+                .trim()
+                .toLowerCase();
 
         /*
          * Search only by IP address
@@ -3712,7 +3495,7 @@ function clearCameraSearch() {
 
 document.addEventListener(
     "DOMContentLoaded",
-    function() {
+    function () {
 
         const searchInput =
             document.getElementById(
@@ -3755,6 +3538,8 @@ document.addEventListener(
 function renderBackendCameras(
     list = backendCameras
 ) {
+    const cBadge = document.getElementById('sidebarCamerasCount');
+    if (cBadge && list === backendCameras) cBadge.textContent = backendCameras.length;
 
     const grid =
         document.getElementById(
@@ -3765,9 +3550,9 @@ function renderBackendCameras(
         return;
     }
 
-        // Update CCTV dashboard summary from real backend data
+    // Update CCTV dashboard summary from real backend data
     updateCameraDashboardStats(list);
-    
+
     if (!list.length) {
 
         grid.innerHTML = `
@@ -3785,7 +3570,7 @@ function renderBackendCameras(
     }
 
     grid.innerHTML =
-        list.map(function(camera) {
+        list.map(function (camera) {
 
             const status =
                 String(
@@ -3799,13 +3584,13 @@ function renderBackendCameras(
 
             const latency =
                 camera.last_latency_ms !== null &&
-                camera.last_latency_ms !== undefined
+                    camera.last_latency_ms !== undefined
                     ? camera.last_latency_ms + " ms"
                     : "—";
 
             const uptime =
                 camera.uptime_percent !== null &&
-                camera.uptime_percent !== undefined
+                    camera.uptime_percent !== undefined
                     ? camera.uptime_percent + "%"
                     : "0%";
 
@@ -3825,8 +3610,8 @@ function renderBackendCameras(
                     <div class="camera-feed">
 
                         ${status === "offline"
-                            ? "▧"
-                            : "◉"}
+                    ? "▧"
+                    : "◉"}
 
                     </div>
 
@@ -4014,7 +3799,7 @@ async function submitCameraToBackend(
 
         const response =
             await fetch(
-                "http://127.0.0.1:8000/api/cameras",
+                `${window.APP_CONFIG.API_BASE_URL}/api/cameras?_t=${Date.now()}`,
                 {
                     method: "POST",
 
@@ -4098,9 +3883,7 @@ async function submitCameraToBackend(
 // MANUAL CCTV PING
 // ---------------------------------------------------------
 
-async function pingCameraFromFrontend(
-    cameraId
-) {
+async function pingCameraFromFrontend(cameraId, options = {}) {
 
     const token =
         localStorage.getItem(
@@ -4117,16 +3900,14 @@ async function pingCameraFromFrontend(
     }
 
 
-    toast(
-        "Pinging CCTV..."
-    );
+    if (!options.silent) toast("Pinging CCTV...");
 
 
     try {
 
         const response =
             await fetch(
-                `http://127.0.0.1:8000/api/cameras/${cameraId}/ping`,
+                `${window.APP_CONFIG.API_BASE_URL}/api/cameras/${cameraId}/ping`,
                 {
                     method: "POST",
 
@@ -4159,12 +3940,25 @@ async function pingCameraFromFrontend(
         );
 
 
-        toast(
-            `${data.camera_code} → ${data.status} | ${data.latency_ms ?? "-"} ms`
-        );
+        if (!options.silent) toast(`${data.camera_code} → ${data.status} | ${data.latency_ms ?? "-"} ms`);
 
+        const index = backendCameras.findIndex(c => Number(c.id) === Number(cameraId));
+        if (index >= 0) {
+            backendCameras[index].status = data.status;
+            backendCameras[index].last_latency_ms = data.latency_ms;
+            backendCameras[index].total_checks = data.total_checks;
+            backendCameras[index].successful_checks = data.successful_checks;
+            backendCameras[index].uptime_percent = data.uptime_percent;
+            backendCameras[index].last_check = data.last_check;
+            
+            if (options.silent) {
+                if (typeof renderBackendCameras === "function") {
+                    renderBackendCameras(backendCameras);
+                }
+            }
+        }
 
-        await loadCamerasFromBackend();
+        if (!options.silent) await loadCamerasFromBackend();
 
 
     } catch (error) {
@@ -4174,10 +3968,7 @@ async function pingCameraFromFrontend(
             error
         );
 
-        alert(
-            error.message ||
-            "CCTV ping failed."
-        );
+        if (!options.silent) alert(error.message || "CCTV ping failed.");
     }
 }
 
@@ -4328,8 +4119,8 @@ function bindCameraManagement() {
 }
 
 
-document.addEventListener('keydown',function(event){
-    if(event.key!=='Escape') return;
+document.addEventListener('keydown', function (event) {
+    if (event.key !== 'Escape') return;
     closeNmsModal('deviceModal');
     closeNmsModal('cameraModal');
 });
@@ -4652,7 +4443,7 @@ function renderReportTable() {
     tbody.innerHTML = "";
 
 
-    nmsReportData.forEach(function(device) {
+    nmsReportData.forEach(function (device) {
 
         const row =
             document.createElement("tr");
@@ -4704,8 +4495,8 @@ function renderReportTable() {
 
     });
 
-    const recordCount=document.getElementById("reportRecordCount");
-    if(recordCount) recordCount.textContent=`${nmsReportData.length} Records`;
+    const recordCount = document.getElementById("reportRecordCount");
+    if (recordCount) recordCount.textContent = `${nmsReportData.length} Records`;
 
 }
 
@@ -4771,11 +4562,11 @@ function updateReportSummary() {
         alertElement.textContent = alerts;
     }
 
-    const uptimeElement=document.getElementById("reportUptime");
-    if(uptimeElement){
-        const values=nmsReportData.filter(d=>d.status!=="Offline").map(d=>parseFloat(d.uptime));
-        const avg=values.length?values.reduce((a,b)=>a+b,0)/values.length:0;
-        uptimeElement.textContent=avg.toFixed(2)+"%";
+    const uptimeElement = document.getElementById("reportUptime");
+    if (uptimeElement) {
+        const values = nmsReportData.filter(d => d.status !== "Offline").map(d => parseFloat(d.uptime));
+        const avg = values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0;
+        uptimeElement.textContent = avg.toFixed(2) + "%";
     }
 
 }
@@ -4901,7 +4692,7 @@ function downloadCSVReport() {
 
     let csv = "Device,Type,IP Address,Status,Uptime\n";
 
-    reportDownloadData.forEach(function(row) {
+    reportDownloadData.forEach(function (row) {
 
         csv +=
             `"${row.device}",` +
@@ -4955,7 +4746,7 @@ function downloadExcelReport() {
         return;
     }
 
-    const excelData = reportDownloadData.map(function(row) {
+    const excelData = reportDownloadData.map(function (row) {
 
         return {
             "Device": row.device,
@@ -5112,7 +4903,7 @@ document.addEventListener("DOMContentLoaded", function () {
         // Status message
         const statusText = document.getElementById("reportStatusText");
         if (statusText) statusText.textContent = "Report history cleared successfully.";
-        else { const status = document.getElementById("reportStatus"); if(status) status.textContent = "Report history cleared successfully."; }
+        else { const status = document.getElementById("reportStatus"); if (status) status.textContent = "Report history cleared successfully."; }
 
 
         alert("Reports history cleared successfully.");
@@ -5167,7 +4958,7 @@ document.addEventListener("DOMContentLoaded", function () {
 // One source of truth for Add / Ping / Delete.
 // ==========================================================
 
-const NMS_API_BASE = "http://127.0.0.1:8000";
+const NMS_API_BASE = window.APP_CONFIG.API_BASE_URL;
 const deviceMonitoringTimers = new Map();
 
 function getAuthToken() {
@@ -5585,7 +5376,7 @@ async function deleteCameraFromFrontend(cameraId, cameraCode) {
     try {
 
         const response = await fetch(
-            "http://127.0.0.1:8000/api/cameras/" + cameraId,
+            window.APP_CONFIG.API_BASE_URL + "/api/cameras/" + cameraId,
             {
                 method: "DELETE",
                 headers: {
@@ -5616,7 +5407,7 @@ async function deleteCameraFromFrontend(cameraId, cameraCode) {
 
         // Remove from frontend array
         backendCameras = backendCameras.filter(
-            function(camera) {
+            function (camera) {
                 return Number(camera.id) !== Number(cameraId);
             }
         );
@@ -5654,7 +5445,7 @@ async function deleteCameraFromFrontend(cameraId, cameraCode) {
 window.deleteCameraFromFrontend =
     deleteCameraFromFrontend;
 
-    // =========================================================
+// =========================================================
 // DESKTOP LOCATION MONITOR
 // =========================================================
 
@@ -5845,7 +5636,7 @@ async function setDesktopMonitoringState(enabled) {
 
             const filteredDesktops =
                 desktopData.filter(
-                    function(desktop) {
+                    function (desktop) {
 
                         return String(
                             desktop.location || ''
@@ -5943,6 +5734,11 @@ async function loadDesktopMonitoringState() {
 
         desktopMonitoringEnabled =
             Boolean(data.enabled);
+            
+        localStorage.setItem(
+            'desktopMonitoringEnabled',
+            String(data.enabled)
+        );
 
         // -----------------------------------------
         // BACKEND SELECTED LOCATION
@@ -6006,7 +5802,7 @@ async function loadDesktopMonitoringState() {
                     .toLowerCase();
 
             const filteredDesktops =
-                desktopData.filter(function(desktop) {
+                desktopData.filter(function (desktop) {
 
                     return String(
                         desktop.location || ''
@@ -6092,12 +5888,12 @@ function getDesktopLocations() {
     return [
         ...new Set(
             desktopData
-                .map(function(desktop) {
+                .map(function (desktop) {
                     return String(
                         desktop.location || ""
                     ).trim();
                 })
-                .filter(function(location) {
+                .filter(function (location) {
                     return location !== "";
                 })
         )
@@ -6127,7 +5923,7 @@ function renderDesktopLocationOptions(
 
     const locations =
         getDesktopLocations().filter(
-            function(location) {
+            function (location) {
                 return location
                     .toLowerCase()
                     .includes(query);
@@ -6154,7 +5950,7 @@ function renderDesktopLocationOptions(
 
     list.innerHTML =
         locations.map(
-            function(location) {
+            function (location) {
 
                 const isSelected =
                     selectedDesktopMonitoringLocation ===
@@ -6184,17 +5980,17 @@ function renderDesktopLocationOptions(
                 `;
             }
         )
-        .join("");
+            .join("");
 
 
     list.querySelectorAll(
         ".desktop-location-option"
     ).forEach(
-        function(button) {
+        function (button) {
 
             button.addEventListener(
                 "click",
-                function() {
+                function () {
 
                     selectedDesktopMonitoringLocation =
                         this.dataset.location;
@@ -6320,41 +6116,9 @@ async function applyDesktopMonitoringLocation() {
         }
 
         /*
-         * যদি Monitoring OFF থাকে,
-         * কোনো desktop দেখাবো না.
+         * Always display all desktops in inventory.
          */
-        if (!desktopMonitoringEnabled) {
-
-            renderDesktopRows([]);
-
-        } else {
-
-            /*
-             * শুধু selected location-এর
-             * desktop দেখাবে.
-             */
-            const normalizedLocation =
-                selectedLocation
-                    .trim()
-                    .toLowerCase();
-
-            const filteredDesktops =
-                desktopData.filter(
-                    function(desktop) {
-
-                        return String(
-                            desktop.location || ""
-                        )
-                            .trim()
-                            .toLowerCase() ===
-                            normalizedLocation;
-                    }
-                );
-
-            renderDesktopRows(
-                filteredDesktops
-            );
-        }
+        renderDesktopRows(desktopData);
 
         /*
          * Modal close
@@ -6438,7 +6202,7 @@ function loadSelectedDesktopMonitoringLocation() {
 
 document.addEventListener(
     "DOMContentLoaded",
-    function() {
+    function () {
 
         const locationButton =
             document.getElementById(
@@ -6450,10 +6214,10 @@ document.addEventListener(
                 "closeDesktopLocationModal"
             );
 
-            const monitoringToggle =
-    document.getElementById(
-        "desktopMonitoringToggle"
-    );
+        const monitoringToggle =
+            document.getElementById(
+                "desktopMonitoringToggle"
+            );
 
         const cancelButton =
             document.getElementById(
@@ -6470,17 +6234,17 @@ document.addEventListener(
                 "desktopLocationSearch"
             );
 
-            // DESKTOP MONITORING ON / OFF
-monitoringToggle?.addEventListener(
-    "change",
-    function() {
+        // DESKTOP MONITORING ON / OFF
+        monitoringToggle?.addEventListener(
+            "change",
+            function () {
 
-        setDesktopMonitoringState(
-            this.checked
+                setDesktopMonitoringState(
+                    this.checked
+                );
+
+            }
         );
-
-    }
-);
 
         locationButton?.addEventListener(
             "click",
@@ -6505,7 +6269,7 @@ monitoringToggle?.addEventListener(
 
         searchInput?.addEventListener(
             "input",
-            function() {
+            function () {
 
                 renderDesktopLocationOptions(
                     this.value
@@ -6520,7 +6284,7 @@ monitoringToggle?.addEventListener(
             )
             ?.addEventListener(
                 "click",
-                function(event) {
+                function (event) {
 
                     if (
                         event.target === this
@@ -6551,124 +6315,323 @@ document.addEventListener(
 async function loadDashboardStats() {
     try {
         const token = localStorage.getItem('access_token');
-        if(!token) return;
-        const res = await fetch(NMS_API_BASE + '/api/dashboard/stats', {
-            headers: {'Authorization': 'Bearer ' + token}
+        if (!token) return;
+        
+        // Fetch dashboard stats
+        const res = await fetch(NMS_API_BASE + '/api/dashboard/stats?_t=' + Date.now(), {
+            headers: { 'Authorization': 'Bearer ' + token }
         });
-        if(res.ok) {
+        
+        if (res.ok) {
             const data = await res.json();
-            if(data.success) {
+            if (data.success) {
+                let enableAlerts = true;
+                try { const s = JSON.parse(localStorage.getItem('nmsSettings') || '{}'); if(s.alert === false) enableAlerts = false; } catch(e){}
+                
+                if (!enableAlerts) {
+                    data.active_alerts = 0;
+                }
+                
+                let prevAlertCount = window.lastKnownAlertCount !== undefined ? window.lastKnownAlertCount : data.active_alerts;
+                if (data.active_alerts > prevAlertCount && enableAlerts) {
+                    toast("?? New system alert received!");
+                    if (typeof playSound === "function") playSound();
+                }
+                window.lastKnownAlertCount = data.active_alerts;
+
                 const elTotal = document.getElementById('dashTotal');
                 const elOnline = document.getElementById('dashOnline');
                 const elAlerts = document.getElementById('dashAlerts');
-                const elLoad = document.getElementById('dashLoad');
+
+                if (elTotal) elTotal.textContent = data.total_devices;
+                if (elOnline) elOnline.textContent = data.online_devices;
+                if (elAlerts) elAlerts.textContent = data.active_alerts;
+                const sbAlerts = document.getElementById('sidebarAlertsCount');
+                const hrAlerts = document.getElementById('headerAlertsCount');
+                if (sbAlerts) sbAlerts.textContent = data.active_alerts;
+                if (hrAlerts) hrAlerts.textContent = data.active_alerts;
                 
-                if(elTotal) elTotal.textContent = data.total_devices;
-                if(elOnline) elOnline.textContent = data.online_devices;
-                if(elAlerts) elAlerts.textContent = data.active_alerts;
-                if(elLoad) elLoad.textContent = data.network_load;
+                const elHealth = document.getElementById('dashHealthList');
+                if (elHealth && data.breakdown) {
+                    elHealth.innerHTML = `
+                        <div><span>📷 CCTV Cameras</span><b>${data.breakdown.cameras.online} / ${data.breakdown.cameras.total}</b></div>
+                        <div><span>🖧 Network Devices</span><b>${data.breakdown.devices.online} / ${data.breakdown.devices.total}</b></div>
+                        <div><span>🖥 Desktop Clients</span><b>${data.breakdown.desktops.online} / ${data.breakdown.desktops.total}</b></div>
+                    `;
+                }
+                
+                const hl = document.getElementById('dashHealthList');
+                if (hl && data.breakdown) {
+                    const c = data.breakdown.cameras;
+                    const d = data.breakdown.devices;
+                    const desk = data.breakdown.desktops;
+                    
+                    hl.innerHTML = `
+                        <div><span>▣ CCTV Cameras</span><b class="${c.online < c.total ? 'amber' : ''}">${c.online} / ${c.total}</b></div>
+                        <div><span>⌁ Network Devices</span><b class="${d.online < d.total ? 'amber' : ''}">${d.online} / ${d.total}</b></div>
+                        <div><span>▤ Desktops</span><b class="${desk.online < desk.total ? 'amber' : ''}">${desk.online} / ${desk.total}</b></div>
+                    `;
+                    
+                    const availability = data.total_devices > 0 ? ((data.online_devices / data.total_devices) * 100).toFixed(1) : 100;
+                    
+                    const avBox = document.querySelector('.availability b');
+                    const avBar = document.querySelector('.availability i');
+                    if (avBox) avBox.textContent = availability + '%';
+                    if (avBar) avBar.style.width = availability + '%';
+
+                    const dashQC = document.getElementById('dashQuickCCTV');
+                    const dashQN = document.getElementById('dashQuickNetwork');
+                    const dashQD = document.getElementById('dashQuickDevices');
+                    const dashQDesk = document.getElementById('dashQuickDesktops');
+                    
+                    if(dashQC) dashQC.textContent = c.total + ' cameras';
+                    if(dashQN) dashQN.textContent = d.total + ' devices';
+                    if(dashQD) dashQD.textContent = d.total + ' devices';
+                    if(dashQDesk) dashQDesk.textContent = data.breakdown.desktops.total + ' desktops';
+                }
             }
         }
-    } catch(err) { console.error('Dashboard Stats Error', err); }
+        
+        // Fetch recent alerts
+        const alRes = await fetch(NMS_API_BASE + '/api/alerts?_t=' + Date.now(), {
+            headers: { 'Authorization': 'Bearer ' + token }
+        });
+        if (alRes.ok) {
+            const alData = await alRes.json();
+            if (alData.success) {
+                const alList = document.getElementById('dashAlertsList');
+                if (alList) {
+                    let enableAlerts = true;
+                    try { const s = JSON.parse(localStorage.getItem('nmsSettings') || '{}'); if(s.alert === false) enableAlerts = false; } catch(e){}
+                    alList.innerHTML = '';
+                    const alerts = enableAlerts ? alData.alerts.slice(0, 4) : [];
+                    if (alerts.length === 0) {
+                        alList.innerHTML = '<div style="padding:20px;text-align:center;color:#688097">No recent alerts. Everything is healthy.</div>';
+                    } else {
+                        alerts.forEach(a => {
+                            const icon = a.severity === 'Critical' ? '!' : (a.severity === 'Warning' ? '!' : 'i');
+                            const cls = (a.severity || 'info').toLowerCase();
+                            const time = new Date(a.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                            alList.innerHTML += `
+                                <div class="alert ${cls}">
+                                    <i>${icon}</i>
+                                    <div><b>${a.message}</b><small>${a.source_type} ${a.source_name} · ${time}</small></div>
+                                    <label>${a.severity}</label>
+                                </div>
+                            `;
+                        });
+                    }
+                }
+            }
+        }
+    } catch (err) { console.error('Dashboard Stats Error', err); }
 }
 
-const origRefreshAll = window.refreshAll || function(){};
-window.refreshAll = function() {
-    origRefreshAll();
-    loadDashboardStats();
-};
+
 document.addEventListener('DOMContentLoaded', () => { setTimeout(loadDashboardStats, 1000); });
 
 // Dynamic Network Map
 async function loadNetworkMap() {
     try {
         const token = localStorage.getItem('access_token');
-        if(!token) return;
-        const res = await fetch(NMS_API_BASE + '/api/network-map', { headers: {'Authorization': 'Bearer ' + token} });
-        if(res.ok) {
+        if (!token) return;
+        const res = await fetch(NMS_API_BASE + '/api/network-map?_t=' + Date.now(), { headers: { 'Authorization': 'Bearer ' + token } });
+        if (res.ok) {
             const data = await res.json();
-            if(data.success && data.nodes.length > 0) {
+            if (data.success && data.nodes.length > 0) {
                 const topoEl = document.querySelector('.topology');
-                if(!topoEl) return;
-                
-                topoEl.style.display = 'flex';
-                topoEl.style.flexWrap = 'wrap';
-                topoEl.style.gap = '20px';
-                topoEl.style.padding = '20px';
-                topoEl.style.overflow = 'auto';
-                topoEl.style.alignItems = 'flex-start';
+                if (!topoEl) return;
+
+                // Configure container for absolute positioning
+                topoEl.style.position = 'relative';
+                topoEl.style.display = 'block';
+                topoEl.style.minHeight = '700px';
+                topoEl.style.overflow = 'hidden';
+                topoEl.style.background = 'radial-gradient(circle at center, #0B1622 0%, #060B12 100%)';
                 topoEl.innerHTML = '';
+
+                const width = topoEl.clientWidth || 800;
+                const height = topoEl.clientHeight || 700;
+                const centerX = width / 2;
+                const centerY = height / 2;
+
+                // Create SVG for lines
+                let svgHTML = `<svg style="position:absolute; top:0; left:0; width:100%; height:100%; z-index:1; pointer-events:none;">`;
+
+                // Calculate positions in concentric circles
+                const nodes = data.nodes;
+                const nodeHTMLs = [];
                 
-                data.nodes.forEach(n => {
-                    const statusClass = (n.status === 'Online') ? 'online' : 'offline';
-                    const statusStr = (n.status === 'Online') ? ('? ONLINE ' + n.last_latency_ms + 'ms') : '? OFFLINE';
-                    const nodeHTML = '<div style="position:static; width:155px; padding:13px; text-align:center; background:#102132; border:1px solid #29465e; border-radius:9px; box-shadow:0 15px 35px #0005;">' +
-                        '<b style="font-size:10px;display:block;color:white;">' + n.device_code + '</b>' +
-                        '<small style="font-size:7px;color:#688097;display:block;margin:4px;">' + n.ip_address + ' - ' + n.location + '</small>' +
-                        '<span class="status ' + statusClass + '" style="font-size:7px;">' + statusStr + '</span>' +
-                    '</div>';
-                    topoEl.innerHTML += nodeHTML;
+                // Identify a core node if one exists, else make NMS Server the center
+                const centerHtml = `<div style="position:absolute; left:${centerX - 40}px; top:${centerY - 40}px; width:80px; height:80px; background:#0e88e5; border-radius:50%; display:flex; align-items:center; justify-content:center; flex-direction:column; box-shadow: 0 0 30px rgba(14,136,229,0.5); z-index:10; border:2px solid #64b5f6;">
+                    <b style="font-size:12px; color:white;">CORE</b>
+                    <small style="font-size:8px; color:#bbdefb;">NMS</small>
+                </div>`;
+                nodeHTMLs.push(centerHtml);
+
+                const count = nodes.length;
+                
+                nodes.forEach((n, i) => {
+                    // Distribute nodes in circles
+                    // Outer circle radius based on container size
+                    let radius = Math.min(width, height) * 0.35;
+                    
+                    // If too many nodes, create two layers of circles
+                    if (count > 12 && i % 2 === 0) {
+                        radius = Math.min(width, height) * 0.22;
+                    }
+                    
+                    const angle = (i / count) * 2 * Math.PI - Math.PI / 2; // Start from top
+                    const nx = centerX + radius * Math.cos(angle);
+                    const ny = centerY + radius * Math.sin(angle);
+                    
+                    const isOnline = (n.status === 'Online');
+                    const statusClass = isOnline ? 'online' : 'offline';
+                    const statusStr = isOnline ? ('&#9889; ' + n.last_latency_ms + 'ms') : '&#9888; OFFLINE';
+                    const lineColor = isOnline ? 'rgba(0, 230, 118, 0.4)' : 'rgba(255, 61, 87, 0.6)';
+                    const dashArray = isOnline ? 'none' : '5,5';
+                    const anim = isOnline ? `<animate attributeName="stroke-opacity" values="0.2;1;0.2" dur="${(Math.random() * 2 + 1).toFixed(1)}s" repeatCount="indefinite" />` : '';
+
+                    // Draw line
+                    svgHTML += `<line x1="${centerX}" y1="${centerY}" x2="${nx}" y2="${ny}" stroke="${lineColor}" stroke-width="2" stroke-dasharray="${dashArray}">${anim}</line>`;
+
+                    // Draw Node
+                    const nodeWidth = 110;
+                    const nodeHeight = 60;
+                    
+                    const glowColor = isOnline ? 'rgba(0, 230, 118, 0.2)' : 'rgba(255, 61, 87, 0.3)';
+                    const borderC = isOnline ? '#29465e' : '#ff3d57';
+
+                    const html = `<div class="node-hover" style="position:absolute; left:${nx - nodeWidth/2}px; top:${ny - nodeHeight/2}px; width:${nodeWidth}px; padding:8px; text-align:center; background:#102132; border:1px solid ${borderC}; border-radius:9px; box-shadow:0 0 15px ${glowColor}; z-index:5; transition: transform 0.2s;">
+                        <b style="font-size:10px;display:block;color:white;text-overflow:ellipsis;overflow:hidden;white-space:nowrap;">${n.device_code}</b>
+                        <small style="font-size:8px;color:#688097;display:block;margin:2px;text-overflow:ellipsis;overflow:hidden;white-space:nowrap;">${n.ip_address}</small>
+                        <span class="status ${statusClass}" style="font-size:8px; padding:2px 4px;">${statusStr}</span>
+                        </div>`;
+                    nodeHTMLs.push(html);
                 });
+
+                svgHTML += `</svg>`;
+                topoEl.innerHTML = svgHTML + nodeHTMLs.join('');
+                
+                // Add hover effect css if not exists
+                if (!document.getElementById('topo-hover-style')) {
+                    const style = document.createElement('style');
+                    style.id = 'topo-hover-style';
+                    style.innerHTML = '.node-hover:hover { transform: scale(1.1) !important; z-index: 20 !important; cursor: pointer; }';
+                    document.head.appendChild(style);
+                }
             }
         }
-    } catch(err) { console.error('Map Error', err); }
+    } catch (err) { }
 }
 
-// Logs removed
-// Alerts
+
 async function loadAlerts() {
     try {
         const token = localStorage.getItem('access_token');
-        if(!token) return;
-        const res = await fetch(NMS_API_BASE + '/api/alerts', { headers: {'Authorization': 'Bearer ' + token} });
-        if(res.ok) {
+        if (!token) return;
+        const res = await fetch(NMS_API_BASE + '/api/alerts?_t=' + Date.now(), { headers: { 'Authorization': 'Bearer ' + token } });
+        if (res.ok) {
             const data = await res.json();
-            if(data.success) {
+            if (data.success) {
+                let enableAlerts = true;
+                try { const s = JSON.parse(localStorage.getItem('nmsSettings') || '{}'); if(s.alert === false) enableAlerts = false; } catch(e){}
+                if(!enableAlerts) data.alerts = [];
+
                 const alertList = document.querySelector('.incident-list');
-                if(!alertList) return;
+                if (!alertList) return;
                 alertList.innerHTML = '';
+                
+                if (data.alerts.length === 0) {
+                    alertList.innerHTML = '<div style="padding:40px;text-align:center;color:#688097;font-size:16px;"><b>No Active Alerts</b><br><br><small>Everything is healthy and operational.</small></div>';
+                    return;
+                }
+                
                 data.alerts.forEach(a => {
                     const cssBg = a.severity === 'Critical' ? 'critical-bg' : (a.severity === 'Warning' ? 'warning-bg' : 'info-bg');
                     const cssBorder = a.severity === 'Critical' ? 'critical-border' : (a.severity === 'Warning' ? 'warning-border' : 'info-border');
-                    const dStr = new Date(a.created_at).toLocaleString();
+                    const createdDate = new Date(a.created_at);
+                    
+                    // Format relative time
+                    const seconds = Math.floor((new Date() - createdDate) / 1000);
+                    let timeAgo = Math.floor(seconds) + " seconds ago";
+                    let interval = seconds / 31536000;
+                    if (interval > 1) { timeAgo = Math.floor(interval) + " years ago"; }
+                    else {
+                        interval = seconds / 2592000;
+                        if (interval > 1) { timeAgo = Math.floor(interval) + " months ago"; }
+                        else {
+                            interval = seconds / 86400;
+                            if (interval > 1) { timeAgo = Math.floor(interval) + " days ago"; }
+                            else {
+                                interval = seconds / 3600;
+                                if (interval > 1) { timeAgo = Math.floor(interval) + " hours ago"; }
+                                else {
+                                    interval = seconds / 60;
+                                    if (interval > 1) { timeAgo = Math.floor(interval) + " minutes ago"; }
+                                }
+                            }
+                        }
+                    }
+
+                    // Find location from frontend state
+                    let loc = "Unknown Location";
+                    if (typeof backendDevices !== 'undefined') {
+                        const dev = backendDevices.find(d => d.device_code === a.source_name);
+                        if (dev && dev.location) loc = dev.location;
+                    }
+                    if (loc === "Unknown Location" && typeof backendCameras !== 'undefined') {
+                        const cam = backendCameras.find(c => c.camera_code === a.source_name);
+                        if (cam && cam.location) loc = cam.location;
+                    }
+                    if (loc === "Unknown Location" && typeof desktopData !== 'undefined') {
+                        const desk = desktopData.find(d => d.id === a.source_name);
+                        if (desk && desk.location) loc = desk.location;
+                    }
+
+                    const timeStr = createdDate.toLocaleTimeString();
+                    const detailsStr = loc + ' &bull; Detected ' + timeAgo + ' &bull; Logged at ' + timeStr;
+
+                    let cleanMsg = a.message;
+                    
                     alertList.innerHTML += '<div class="incident ' + cssBorder + '">' +
-                        '<div class="severity ' + cssBg + '">' + a.severity + '</div>' +
-                        '<div><h3>' + a.source_name + ' - ' + a.message + '</h3><p>' + dStr + '</p></div>' +
+                        '<div class="severity ' + cssBg + '">' + a.severity.toUpperCase() + '</div>' +
+                        '<div><h3 style="margin-bottom:5px;">' + cleanMsg + '</h3><p style="font-size:12px; color:#a2b5cd;">' + detailsStr + '</p></div>' +
                         '<div class="severity info-bg">' + a.status + '</div>' +
-                    '</div>';
+                        '</div>';
                 });
             }
         }
-    } catch(err) {}
+    } catch (err) { }
 }
 
-window.ackAlerts = async function() {
+window.ackAlerts = async function () {
     try {
         const token = localStorage.getItem('access_token');
-        const res = await fetch(NMS_API_BASE + '/api/alerts/acknowledge', { method: 'PUT', headers: {'Authorization': 'Bearer ' + token} });
-        if(res.ok) {
+        const res = await fetch(NMS_API_BASE + '/api/alerts/acknowledge', { method: 'PUT', headers: { 'Authorization': 'Bearer ' + token } });
+        if (res.ok) {
             toast('All alerts acknowledged');
             loadAlerts();
             loadDashboardStats();
         }
-    } catch(err) {}
+    } catch (err) { }
 };
 
 // Reports Override
-window.generateReport = async function() {
+window.generateReport = async function () {
     try {
         const token = localStorage.getItem('access_token');
-        const res = await fetch(NMS_API_BASE + '/api/reports', { headers: {'Authorization': 'Bearer ' + token} });
-        if(res.ok) {
+        const res = await fetch(NMS_API_BASE + '/api/reports?_t=' + Date.now(), { headers: { 'Authorization': 'Bearer ' + token } });
+        if (res.ok) {
             const data = await res.json();
-            if(data.success) {
+            if (data.success) {
                 const tbody = document.getElementById('reportTbody');
-                if(tbody) {
+                if (tbody) {
                     tbody.innerHTML = '';
                     let rTotal = 0, rOnline = 0, avgUptime = 0;
                     data.report.forEach(r => {
                         rTotal++;
-                        if(r.status==='Online') rOnline++;
+                        if (r.status === 'Online') rOnline++;
                         avgUptime += parseFloat(r.uptime || 0);
                         const statusHTML = r.status === 'Online' ? '<span class="status-badge online">? Online</span>' : '<span class="status-badge offline">? Offline</span>';
                         tbody.innerHTML += '<tr>' +
@@ -6677,23 +6640,23 @@ window.generateReport = async function() {
                             '<td>' + r.ip + '</td>' +
                             '<td>' + (r.uptime || 0) + '%</td>' +
                             '<td>' + statusHTML + '</td>' +
-                        '</tr>';
+                            '</tr>';
                     });
-                    
+
                     const rtTotal = document.getElementById('reportTotalDevices');
                     const rtOnline = document.getElementById('reportOnlineDevices');
                     const rtUptime = document.getElementById('reportAvgUptime');
-                    
-                    if(rtTotal) rtTotal.textContent = rTotal;
-                    if(rtOnline) rtOnline.textContent = rOnline;
-                    if(rtUptime) rtUptime.textContent = rTotal > 0 ? (avgUptime/rTotal).toFixed(2) + '%' : '0%';
+
+                    if (rtTotal) rtTotal.textContent = rTotal;
+                    if (rtOnline) rtOnline.textContent = rOnline;
+                    if (rtUptime) rtUptime.textContent = rTotal > 0 ? (avgUptime / rTotal).toFixed(2) + '%' : '0%';
                 }
-                
+
                 window.nmsReportData = data.report;
             }
         }
         toast('Report generated successfully');
-    } catch(err) {
+    } catch (err) {
         toast('Failed to generate report');
     }
 };
@@ -6705,7 +6668,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // Map report data for downloads
 const origGen = window.generateReport;
-window.generateReport = async function() {
+window.generateReport = async function () {
     await origGen();
     if (window.nmsReportData) {
         window.reportDownloadData = window.nmsReportData.map(r => ({
@@ -6717,4 +6680,127 @@ window.generateReport = async function() {
         }));
     }
 };
+
+
+// --- AUTO MONITORING FIX ---
+let autoMonitorIntervalId = null;
+
+function startAutoMonitor() {
+    if (autoMonitorIntervalId) clearInterval(autoMonitorIntervalId);
+    let tick = 0;
+    
+    autoMonitorIntervalId = setInterval(() => {
+        if (localStorage.getItem('adminLoggedIn') !== 'true') return;
+        tick++;
+
+        // Read dynamically so it respects settings immediately without restart
+        let s = {};
+        try { s = JSON.parse(localStorage.getItem('nmsSettings') || '{}'); } catch(e){}
+        let netInterval = parseInt(s.networkInterval) || 10;
+        let camInterval = parseInt(s.cameraInterval) || 5;
+        let defaultInterval = 5;
+
+        const pageName = window.currentPage || document.querySelector('.page.active')?.id;
+        
+        // Global stats every default interval (5s)
+        if (tick % defaultInterval === 0) {
+            if (typeof loadDashboardStats === 'function') loadDashboardStats();
+            if (pageName === 'alerts' && typeof loadAlerts === 'function') loadAlerts();
+        }
+        
+        // Network Devices based on networkMonitoring and networkInterval
+        let netEnabled = s.networkMonitoring !== false;
+        if (netEnabled && tick % netInterval === 0 && pageName === 'devices') {
+            if (typeof loadDevicesFromBackend === 'function') loadDevicesFromBackend();
+        }
+        
+        // Cameras based on cameraMonitoring and cameraInterval
+        let camEnabled = s.cameraMonitoring !== false;
+        if (camEnabled && tick % camInterval === 0 && pageName === 'cctv') {
+            if (typeof loadCamerasFromBackend === 'function') loadCamerasFromBackend();
+        }
+    }, 1000);
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    setTimeout(startAutoMonitor, 2000);
+});
+// ---------------------------
+
+// --- BACKGROUND EXPLICIT PINGING TASKS ---
+let devicePingIntervalId = null;
+let cameraPingIntervalId = null;
+
+function startBackgroundPinging() {
+    if (devicePingIntervalId) clearInterval(devicePingIntervalId);
+    if (cameraPingIntervalId) clearInterval(cameraPingIntervalId);
+
+    const netSelect = document.getElementById('networkInterval');
+    let netInterval = netSelect && netSelect.value ? parseInt(netSelect.value) : 10;
+    if (isNaN(netInterval) || netInterval < 5) netInterval = 5;
+
+    const camSelect = document.getElementById('cameraInterval');
+    let camInterval = camSelect && camSelect.value ? parseInt(camSelect.value) : 30;
+    if (isNaN(camInterval) || camInterval < 5) camInterval = 5;
+
+    devicePingIntervalId = setInterval(async () => {
+        if (localStorage.getItem('adminLoggedIn') !== 'true') return;
+        if (typeof backendDevices !== 'undefined' && Array.isArray(backendDevices)) {
+            for (const d of backendDevices) {
+                // Ping devices with monitoring_enabled
+                if (d.monitoring_enabled == 1 || d.monitoring_enabled === true || d.monitoring_enabled === 'true') {
+                    if (typeof pingDeviceFromFrontend === 'function') {
+                        pingDeviceFromFrontend(d.id, { silent: true }).catch(e => console.error(e));
+                    }
+                }
+            }
+        }
+    }, netInterval * 1000);
+
+    // Maintain last check times for each camera
+    if (!window.cameraLastCheckTimes) window.cameraLastCheckTimes = {};
+    
+    cameraPingIntervalId = setInterval(async () => {
+        if (localStorage.getItem('adminLoggedIn') !== 'true') return;
+        
+        const camSelect = document.getElementById('cameraInterval');
+        let currentCamInterval = camSelect && camSelect.value ? parseInt(camSelect.value) : 30;
+        if (isNaN(currentCamInterval) || currentCamInterval < 5) currentCamInterval = 5;
+        
+        const retrySelect = document.getElementById('cameraRetryInterval');
+        let currentRetryInterval = retrySelect && retrySelect.value ? parseInt(retrySelect.value) : 120;
+        if (isNaN(currentRetryInterval) || currentRetryInterval < 5) currentRetryInterval = 30;
+
+        const now = Date.now();
+
+        if (typeof backendCameras !== 'undefined' && Array.isArray(backendCameras)) {
+            for (const c of backendCameras) {
+                if (c.monitoring_enabled == 1 || c.monitoring_enabled === true || c.monitoring_enabled === 'true') {
+                    const status = String(c.status || '').toLowerCase();
+                    const intervalToUse = (status === 'offline' || status === 'unreachable' || status === 'unknown') ? currentRetryInterval : currentCamInterval;
+                    
+                    const last = window.cameraLastCheckTimes[c.id] || 0;
+                    if (now - last >= intervalToUse * 1000) {
+                        window.cameraLastCheckTimes[c.id] = now;
+                        if (typeof pingCameraFromFrontend === 'function') {
+                            pingCameraFromFrontend(c.id, { silent: true }).catch(e => console.error(e));
+                        }
+                    }
+                }
+            }
+        }
+    }, 1000); // Check every second, but respect the specific camera intervals
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    setTimeout(startBackgroundPinging, 4000); // Start after initial load
+    
+    const netSelect = document.getElementById('networkInterval');
+    if (netSelect) netSelect.addEventListener('change', startBackgroundPinging);
+    
+    const camSelect = document.getElementById('cameraInterval');
+    if (camSelect) camSelect.addEventListener('change', startBackgroundPinging);
+});
+// -----------------------------------------
+
 

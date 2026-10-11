@@ -3604,7 +3604,7 @@ def automatic_ping_device(device):
 def automatic_monitoring_loop():
 
     print(
-        "✅ NMS automatic device monitoring started."
+        "[SUCCESS] NMS automatic device monitoring started."
     )
 
 
@@ -3710,29 +3710,15 @@ def automatic_monitoring_loop():
                 # CALCULATE ELAPSED TIME
                 # --------------------------------------------
 
-                if isinstance(
-                    last_check,
-                    datetime
-                ):
-
-                    elapsed = (
-                        datetime.now() -
-                        last_check
-                    ).total_seconds()
-
-                else:
-
-                    try:
-
-                        last_check_dt = datetime.fromisoformat(str(last_check))
-                       
-                        elapsed = (datetime.now() -
-                            last_check_dt
-                        ).total_seconds()
-
-                    except (ValueError,TypeError):
-                          last_check_dt = None
-                    elapsed = interval
+                try:
+                    if isinstance(last_check, datetime):
+                        elapsed = (datetime.now() - last_check).total_seconds()
+                    else:
+                        clean_str = str(last_check).strip().replace(" ", "T")
+                        last_check_dt = datetime.fromisoformat(clean_str)
+                        elapsed = (datetime.now() - last_check_dt).total_seconds()
+                except Exception:
+                    elapsed = 0
 
 
                 # --------------------------------------------
@@ -4165,37 +4151,15 @@ def automatic_desktop_monitoring_loop():
                 # ELAPSED TIME
                 # --------------------------------------
 
-                if isinstance(
-                    last_check,
-                    datetime
-                ):
-
-                    elapsed = (
-                        datetime.now() -
-                        last_check
-                    ).total_seconds()
-
-                else:
-
-                    try:
-
-                        last_check_dt = (
-                            datetime.fromisoformat(
-                                str(last_check)
-                            )
-                        )
-
-                        elapsed = (
-                            datetime.now() -
-                            last_check_dt
-                        ).total_seconds()
-
-                    except (
-                        ValueError,
-                        TypeError
-                    ):
-
-                        elapsed = interval
+                try:
+                    if isinstance(last_check, datetime):
+                        elapsed = (datetime.now() - last_check).total_seconds()
+                    else:
+                        clean_str = str(last_check).strip().replace(" ", "T")
+                        last_check_dt = datetime.fromisoformat(clean_str)
+                        elapsed = (datetime.now() - last_check_dt).total_seconds()
+                except Exception:
+                    elapsed = 0
 
                 # --------------------------------------
                 # PING ONLY WHEN DUE
@@ -4261,7 +4225,7 @@ def automatic_cctv_monitoring_loop():
             db = get_db_connection()
 
             if db is None:
-                print("❌ CCTV monitor: database connection failed.")
+                print("[ERROR] CCTV monitor: database connection failed.")
                 cctv_monitoring_stop_event.wait(5)
                 continue
 
@@ -4333,9 +4297,15 @@ def automatic_cctv_monitoring_loop():
 
                 else:
 
-                    elapsed_seconds = (
-                        now - last_check
-                    ).total_seconds()
+                    try:
+                        if isinstance(last_check, datetime):
+                            elapsed_seconds = (now - last_check).total_seconds()
+                        else:
+                            clean_str = str(last_check).strip().replace(" ", "T")
+                            last_check_dt = datetime.fromisoformat(clean_str)
+                            elapsed_seconds = (now - last_check_dt).total_seconds()
+                    except Exception:
+                        elapsed_seconds = check_interval
 
                     if elapsed_seconds >= check_interval:
                         camera_due = True
@@ -4402,7 +4372,7 @@ def automatic_cctv_monitoring_loop():
                 except Exception as ping_error:
 
                     print(
-                        f"❌ CCTV ping error | "
+                        f"[ERROR] CCTV ping error | "
                         f"{ip_address} | "
                         f"{ping_error}"
                     )
@@ -4490,7 +4460,7 @@ def automatic_cctv_monitoring_loop():
         except Exception as error:
 
             print(
-                f"❌ CCTV automatic monitoring error: "
+                f"[ERROR] CCTV automatic monitoring error: "
                 f"{error}"
             )
 
@@ -4560,7 +4530,7 @@ def start_automatic_monitoring():
 
         monitoring_thread.start()
 
-        print("✅ NMS automatic device monitoring started.")
+        print("[SUCCESS] NMS automatic device monitoring started.")
 
     # ==========================================
     # START CCTV MONITORING
