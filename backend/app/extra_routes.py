@@ -10,7 +10,10 @@ import time
 security = HTTPBearer()
 
 def verify_admin(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    return get_admin_from_token(credentials.credentials)
+    admin = get_admin_from_token(credentials.credentials)
+    if not admin:
+        raise HTTPException(status_code=401, detail="Unauthorized: Invalid or expired session.")
+    return admin
 
 router = APIRouter()
 
@@ -287,3 +290,249 @@ def get_global_settings(admin=Depends(verify_admin)):
     finally:
         cursor.close()
         db.close()
+
+
+# =========================================================
+# ADMIN PANEL & SYSTEM MONITORING ENDPOINTS
+# =========================================================
+
+import hashlib
+import secrets
+
+SCRYPT_N = 16384
+SCRYPT_R = 8
+SCRYPT_P = 1
+SCRYPT_DKLEN = 64
+
+def hash_scrypt_password(password: str) -> str:
+    if not password:
+        raise ValueError("Password cannot be empty.")
+    salt = secrets.token_bytes(16)
+    derived = hashlib.scrypt(
+        password.encode("utf-8"),
+        salt=salt,
+        n=SCRYPT_N,
+        r=SCRYPT_R,
+        p=SCRYPT_P,
+        dklen=SCRYPT_DKLEN,
+    )
+    return f"scrypt${SCRYPT_N}${SCRYPT_R}${SCRYPT_P}${salt.hex()}${derived.hex()}"
+
+
+class AdminCreateRequest(BaseModel):
+    name: str
+    email: str
+    password: str
+    phone: str | None = None
+    department: str | None = None
+    location: str | None = None
+    is_active: bool = True
+
+
+class AdminStatusRequest(BaseModel):
+    is_active: bool
+
+
+@router.get("/api/admin/overview")
+def get_admin_overview(admin=Depends(verify_admin)):
+    db = get_db_connection()
+    if not db:
+        raise HTTPException(status_code=500, detail="Database connection failed")
+    cursor = db.cursor(dictionary=True)
+    try:
+        # 1. Admin counts
+        cursor.execute("SELECT COUNT(*) as total, SUM(CASE WHEN is_active=1 THEN 1 ELSE 0 END) as active FROM admins")
+        admin_counts = cursor.fetchone()
+        total_admins = int(admin_counts["total"] or 0)
+        active_admins = int(admin_counts["active"] or 0)
+        inactive_admins = total_admins - active_admins
+
+        # 2. Asset counts
+        cursor.execute("SELECT COUNT(*) as c FROM devices")
+        dev_c = cursor.fetchone()["c"]
+        cursor.execute("SELECT COUNT(*) as c FROM cameras")
+        cam_c = cursor.fetchone()["c"]
+        cursor.execute("SELECT COUNT(*) as c FROM desktops")
+        desk_c = cursor.fetchone()["c"]
+
+        # 3. Recent activity from alerts
+        cursor.execute("""
+            SELECT id, source_type, source_name, message, severity, created_at
+            FROM alerts
+            ORDER BY created_at DESC
+            LIMIT 6
+        """)
+        recent_activity = cursor.fetchall()
+        for a in recent_activity:
+            if isinstance(a.get("created_at"), datetime):
+                a["created_at"] = a["created_at"].strftime("%Y-%m-%d %H:%M:%S")
+
+        return {
+            "success": True,
+            "total_admins": total_admins,
+            "active_admins": active_admins,
+            "inactive_admins": inactive_admins,
+            "current_admin": {
+                "id": admin["id"],
+                "name": admin["name"],
+                "email": admin["email"],
+                "department": admin.get("department", "IT"),
+                "location": admin.get("location", "NMS HQ")
+            },
+            "system_health": {
+                "backend_status": "Operational (FastAPI Online)",
+                "database_status": "Connected (MySQL nms)",
+                "database_name": "nms",
+                "server_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            },
+            "monitoring_status": {
+                "network_devices": dev_c,
+                "cctv_cameras": cam_c,
+                "desktops": desk_c,
+                "service_status": "Active (Auto-monitoring running)"
+            },
+            "recent_activity": recent_activity
+        }
+    finally:
+        cursor.close()
+        db.close()
+
+
+@router.get("/api/admin/list")
+def list_administrators(admin=Depends(verify_admin)):
+    db = get_db_connection()
+    if not db:
+        raise HTTPException(status_code=500, detail="Database connection failed")
+    cursor = db.cursor(dictionary=True)
+    try:
+        cursor.execute("""
+            SELECT id, name, email, phone, department, location, is_active, created_at, updated_at
+            FROM admins
+            ORDER BY id ASC
+        """)
+        admins = cursor.fetchall()
+        for a in admins:
+            if isinstance(a.get("created_at"), datetime):
+                a["created_at"] = a["created_at"].strftime("%Y-%m-%d %H:%M:%S")
+            if isinstance(a.get("updated_at"), datetime):
+                a["updated_at"] = a["updated_at"].strftime("%Y-%m-%d %H:%M:%S")
+            a["is_active"] = bool(a["is_active"])
+        return {
+            "success": True,
+            "admins": admins,
+            "total": len(admins)
+        }
+    finally:
+        cursor.close()
+        db.close()
+
+
+@router.post("/api/admin/create")
+def create_administrator(data: AdminCreateRequest, admin=Depends(verify_admin)):
+    name = data.name.strip()
+    email = data.email.strip().lower()
+    password = data.password
+
+    if not name or len(name) < 2:
+        raise HTTPException(status_code=400, detail="Administrator name must be at least 2 characters.")
+    if not email or "@" not in email:
+        raise HTTPException(status_code=400, detail="Valid email address is required.")
+    if not password or len(password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters.")
+
+    db = get_db_connection()
+    if not db:
+        raise HTTPException(status_code=500, detail="Database connection failed")
+    cursor = db.cursor(dictionary=True)
+    try:
+        # Check duplicate email
+        cursor.execute("SELECT id FROM admins WHERE LOWER(email) = %s LIMIT 1", (email,))
+        if cursor.fetchone():
+            raise HTTPException(status_code=400, detail="An administrator with this email already exists.")
+
+        pwd_hash = hash_scrypt_password(password)
+        cursor.execute("""
+            INSERT INTO admins (name, email, password_hash, phone, department, location, is_active)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+        """, (
+            name,
+            email,
+            pwd_hash,
+            data.phone.strip() if data.phone else None,
+            data.department.strip() if data.department else None,
+            data.location.strip() if data.location else None,
+            1 if data.is_active else 0
+        ))
+        db.commit()
+        new_id = cursor.lastrowid
+        return {
+            "success": True,
+            "message": f"Administrator '{name}' created successfully.",
+            "admin_id": new_id
+        }
+    finally:
+        cursor.close()
+        db.close()
+
+
+@router.put("/api/admin/{admin_id}/status")
+def update_admin_status(admin_id: int, data: AdminStatusRequest, admin=Depends(verify_admin)):
+    if int(admin["id"]) == int(admin_id) and not data.is_active:
+        raise HTTPException(status_code=400, detail="Cannot deactivate your own logged-in administrator account.")
+
+    db = get_db_connection()
+    if not db:
+        raise HTTPException(status_code=500, detail="Database connection failed")
+    cursor = db.cursor(dictionary=True)
+    try:
+        cursor.execute("SELECT id, name FROM admins WHERE id = %s LIMIT 1", (admin_id,))
+        target = cursor.fetchone()
+        if not target:
+            raise HTTPException(status_code=404, detail="Administrator not found.")
+
+        cursor.execute("UPDATE admins SET is_active = %s, updated_at = CURRENT_TIMESTAMP WHERE id = %s", (
+            1 if data.is_active else 0,
+            admin_id
+        ))
+        db.commit()
+        status_text = "activated" if data.is_active else "deactivated"
+        return {
+            "success": True,
+            "message": f"Administrator '{target['name']}' successfully {status_text}."
+        }
+    finally:
+        cursor.close()
+        db.close()
+
+
+@router.delete("/api/admin/{admin_id}")
+def delete_administrator(admin_id: int, admin=Depends(verify_admin)):
+    if int(admin["id"]) == int(admin_id):
+        raise HTTPException(status_code=400, detail="Cannot delete your own administrator account.")
+
+    db = get_db_connection()
+    if not db:
+        raise HTTPException(status_code=500, detail="Database connection failed")
+    cursor = db.cursor(dictionary=True)
+    try:
+        cursor.execute("SELECT id, name FROM admins WHERE id = %s LIMIT 1", (admin_id,))
+        target = cursor.fetchone()
+        if not target:
+            raise HTTPException(status_code=404, detail="Administrator not found.")
+
+        # Ensure at least 1 active admin remains
+        cursor.execute("SELECT COUNT(*) as c FROM admins WHERE is_active = 1 AND id != %s", (admin_id,))
+        active_remaining = cursor.fetchone()["c"]
+        if active_remaining < 1:
+            raise HTTPException(status_code=400, detail="Cannot delete the only remaining active administrator.")
+
+        cursor.execute("DELETE FROM admins WHERE id = %s", (admin_id,))
+        db.commit()
+        return {
+            "success": True,
+            "message": f"Administrator '{target['name']}' removed successfully."
+        }
+    finally:
+        cursor.close()
+        db.close()
+

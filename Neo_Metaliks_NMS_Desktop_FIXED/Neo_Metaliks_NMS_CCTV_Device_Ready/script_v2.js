@@ -10,7 +10,8 @@ const pageHeadings = {
     alerts: 'Alerts & Incidents',
     reports: 'Reports & Analytics',
     settings: 'NMS Settings',
-    'admin-profile-page': 'Administrator Profile'
+    'admin-profile-page': 'Administrator Profile',
+    'admin-panel': 'Administrator Management & System Health'
 };
 
 function getPages() {
@@ -49,6 +50,7 @@ function openPage(pageName, updateHash = true) {
 
     if (pageName === 'dashboard' && typeof drawChart === 'function') setTimeout(drawChart, 30);
     if (pageName === 'admin-profile-page' && typeof loadAdminProfileData === 'function') loadAdminProfileData();
+    if (pageName === 'admin-panel' && typeof loadAdminPanelData === 'function') loadAdminPanelData();
     return true;
 }
 
@@ -88,7 +90,38 @@ setInterval(clock, 1000); clock();
 function toast(msg) { const t = document.getElementById('toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(window.tt); window.tt = setTimeout(() => t.classList.remove('show'), 2300) }
 function showToast(msg) { toast(msg); }
 
-function refreshAll() { window.location.reload(); }
+async function refreshAll() {
+    const btn = document.querySelector('button[onclick="refreshAll()"]');
+    const originalText = btn ? btn.innerHTML : '↻ Refresh Data';
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '⟳ Refreshing...';
+    }
+    try {
+        const promises = [];
+        if (typeof fetchBackendDevices === 'function') promises.push(fetchBackendDevices());
+        if (typeof fetchBackendCameras === 'function') promises.push(fetchBackendCameras());
+        if (typeof refreshDesktopData === 'function') promises.push(refreshDesktopData());
+        if (typeof updateDashboardStats === 'function') promises.push(updateDashboardStats());
+        if (typeof drawChart === 'function') promises.push(drawChart());
+        if (typeof loadNetworkMap === 'function') promises.push(loadNetworkMap());
+        if (typeof loadAdminPanelData === 'function' && document.getElementById('admin-panel')?.classList.contains('active')) {
+            promises.push(loadAdminPanelData());
+        }
+        if (promises.length > 0) {
+            await Promise.allSettled(promises);
+        }
+        showToast('✅ All infrastructure data refreshed');
+    } catch (err) {
+        console.error('Error during refreshAll:', err);
+        showToast('⚠️ Data refreshed');
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = originalText;
+        }
+    }
+}
 function ackAlerts() { document.getElementById('dashAlerts').textContent = '0'; toast('All alerts acknowledged') }
 async function pingTest() {
     const btn = document.querySelector('button[onclick="pingTest()"]');
@@ -1026,7 +1059,8 @@ document.addEventListener('DOMContentLoaded', function () {
         event.stopPropagation();
 
         const text = (item.innerText || '').trim();
-        if (text.includes('Admin Profile')) openAdminProfile();
+        if (text.includes('Admin Panel')) openAdminPanel();
+        else if (text.includes('Admin Profile')) openAdminProfile();
         else if (text.includes('Admin Settings')) openAdminSettings();
         else if (text.includes('Activity Log')) showAdminActivity();
         else if (text.includes('Logout')) adminLogout();
@@ -1038,6 +1072,7 @@ document.addEventListener('DOMContentLoaded', function () {
 });
 
 // Always expose these functions for inline buttons / browser console.
+window.openAdminPanel = openAdminPanel;
 window.openAdminProfile = openAdminProfile;
 window.openAdminSettings = openAdminSettings;
 window.showAdminActivity = showAdminActivity;
@@ -7129,5 +7164,485 @@ document.addEventListener('DOMContentLoaded', () => {
     if (camSelect) camSelect.addEventListener('change', startBackgroundPinging);
 });
 // -----------------------------------------
+
+/* =========================================================
+   ADMINISTRATOR PANEL & SYSTEM TELEMETRY CONTROLLERS
+   ========================================================= */
+
+window.adminListData = [];
+
+function openAdminPanel() {
+    if (typeof closeAdminMenu === 'function') closeAdminMenu();
+    if (typeof openPage === 'function') {
+        openPage('admin-panel');
+    }
+    loadAdminPanelData();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+async function loadAdminPanelData() {
+    const token = localStorage.getItem('access_token');
+    if (!token) {
+        window.location.replace('login.html');
+        return;
+    }
+
+    const apiBase = (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL !== undefined)
+        ? window.APP_CONFIG.API_BASE_URL
+        : (window.location.port === '8081' ? '' : 'http://' + window.location.hostname + ':8000');
+
+    const refreshBtn = document.getElementById('adminRefreshTelemetryBtn');
+    if (refreshBtn) {
+        refreshBtn.disabled = true;
+        refreshBtn.innerHTML = '⟳ Refreshing...';
+    }
+
+    try {
+        const [overviewRes, listRes] = await Promise.all([
+            fetch(apiBase + '/api/admin/overview', {
+                headers: { 'Authorization': 'Bearer ' + token }
+            }),
+            fetch(apiBase + '/api/admin/list', {
+                headers: { 'Authorization': 'Bearer ' + token }
+            })
+        ]);
+
+        if (overviewRes.status === 401 || listRes.status === 401) {
+            showToast('⚠️ Session expired. Please log in again.');
+            setTimeout(() => { window.location.replace('login.html'); }, 1000);
+            return;
+        }
+
+        const overviewData = await overviewRes.json();
+        const listData = await listRes.json();
+
+        const overviewPayload = overviewData.data || overviewData;
+        if (overviewData.success && overviewPayload) {
+            updateAdminOverviewUI(overviewPayload);
+        }
+
+        if (listData.success && Array.isArray(listData.admins)) {
+            window.adminListData = listData.admins;
+            renderAdminTable(window.adminListData);
+        }
+
+    } catch (err) {
+        console.error('Error loading Admin Panel data:', err);
+        showToast('⚠️ Error loading administrator telemetry');
+    } finally {
+        if (refreshBtn) {
+            refreshBtn.disabled = false;
+            refreshBtn.innerHTML = '↻ Refresh Telemetry';
+        }
+    }
+}
+
+function updateAdminOverviewUI(data) {
+    const totalCountEl = document.getElementById('adminPanelTotalCount');
+    const activeCountEl = document.getElementById('adminPanelActiveCount');
+    const activePercentEl = document.getElementById('adminPanelActivePercent');
+    const backendStatusEl = document.getElementById('adminPanelBackendStatus');
+    const backendSubEl = document.getElementById('adminPanelBackendSub');
+    const dbStatusEl = document.getElementById('adminPanelDbStatus');
+    const dbSubEl = document.getElementById('adminPanelDbSub');
+    const currentAdminBadge = document.getElementById('adminPanelCurrentAdminBadge');
+
+    const totalAdmins = (data.total_admins !== undefined) ? data.total_admins : 1;
+    const activeAdmins = (data.active_admins !== undefined) ? data.active_admins : 1;
+
+    if (totalCountEl) totalCountEl.textContent = totalAdmins;
+    if (activeCountEl) activeCountEl.textContent = activeAdmins;
+
+    if (activePercentEl && totalAdmins > 0) {
+        const pct = Math.round((activeAdmins / totalAdmins) * 100);
+        activePercentEl.textContent = `${pct}% Operational`;
+    }
+
+    if (backendStatusEl) {
+        backendStatusEl.textContent = 'FastAPI Online';
+        backendStatusEl.style.color = '#38bdf8';
+    }
+
+    if (backendSubEl) {
+        backendSubEl.textContent = (data.system_health && data.system_health.backend_status) || 'Port 8000 (Proxy 8081)';
+    }
+
+    if (dbStatusEl) {
+        dbStatusEl.textContent = 'Connected';
+        dbStatusEl.style.color = '#10b981';
+    }
+
+    if (dbSubEl) {
+        dbSubEl.textContent = (data.system_health && data.system_health.database_status) || 'MySQL Pool Active';
+    }
+
+    if (currentAdminBadge && data.current_admin) {
+        currentAdminBadge.textContent = `${data.current_admin.name} (${data.current_admin.email})`;
+    }
+
+    const events = data.recent_activity || data.recent_security_events || [];
+    renderAdminAuditLogs(events);
+}
+
+function renderAdminTable(admins) {
+    const tbody = document.getElementById('adminTableBody');
+    const visibleCountEl = document.getElementById('adminVisibleCount');
+    if (!tbody) return;
+
+    if (!Array.isArray(admins) || admins.length === 0) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="8" style="text-align:center; padding:30px; color:#94a3b8;">
+                    No administrator accounts match your criteria.
+                </td>
+            </tr>
+        `;
+        if (visibleCountEl) visibleCountEl.textContent = '0';
+        return;
+    }
+
+    if (visibleCountEl) visibleCountEl.textContent = admins.length;
+
+    const currentAdminId = parseInt(localStorage.getItem('admin_id')) || 0;
+
+    tbody.innerHTML = admins.map(admin => {
+        const isSelf = admin.id === currentAdminId;
+        const isActive = admin.is_active === 1 || admin.is_active === true;
+        const statusBadge = isActive
+            ? `<span class="admin-badge-active"><span class="pulse-dot green"></span> Active</span>`
+            : `<span class="admin-badge-inactive"><span class="pulse-dot amber"></span> Inactive</span>`;
+        const youBadge = isSelf ? `<span class="admin-badge-self">You</span>` : '';
+        const createdDate = admin.created_at || 'Existing';
+
+        const toggleBtnTitle = isSelf
+            ? "Cannot deactivate your own logged-in account"
+            : (isActive ? "Deactivate account" : "Activate account");
+        const toggleBtnAction = isSelf
+            ? `disabled title="${toggleBtnTitle}"`
+            : `onclick="toggleAdminStatus(${admin.id}, ${!isActive}, '${escapeAdminString(admin.name)}')"` ;
+
+        const deleteBtnTitle = isSelf
+            ? "Cannot delete your own logged-in account"
+            : "Permanently delete account";
+        const deleteBtnAction = isSelf
+            ? `disabled title="${deleteBtnTitle}"`
+            : `onclick="deleteAdmin(${admin.id}, '${escapeAdminString(admin.name)}')"` ;
+
+        return `
+            <tr>
+                <td style="font-family:monospace; color:#64748b;">#${admin.id}</td>
+                <td>
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <span style="display:inline-flex; width:28px; height:28px; border-radius:50%; background:#1e293b; color:#38bdf8; align-items:center; justify-content:center; font-weight:700; font-size:12px; border:1px solid #334155;">
+                            ${(admin.name || 'A').charAt(0).toUpperCase()}
+                        </span>
+                        <div>
+                            <strong style="color:#f8fafc; display:block;">${escapeAdminHtml(admin.name || 'Admin')} ${youBadge}</strong>
+                            <small style="color:#64748b; font-size:11px;">${admin.phone || 'No phone'}</small>
+                        </div>
+                    </div>
+                </td>
+                <td style="color:#94a3b8; font-family:monospace; font-size:12px;">${escapeAdminHtml(admin.email)}</td>
+                <td><span style="background:#1e293b; padding:3px 8px; border-radius:4px; font-size:12px; color:#cbd5e1;">${escapeAdminHtml(admin.department || 'IT & Network')}</span></td>
+                <td style="color:#cbd5e1; font-size:12px;">${escapeAdminHtml(admin.location || 'Neo Metaliks')}</td>
+                <td>${statusBadge}</td>
+                <td style="color:#64748b; font-size:12px;">${createdDate}</td>
+                <td style="text-align:right;">
+                    <div style="display:inline-flex; gap:6px;">
+                        <button type="button" class="admin-action-btn ${isActive ? 'danger' : 'success'}" ${toggleBtnAction}>
+                            ${isActive ? '⏸ Deactivate' : '▶ Activate'}
+                        </button>
+                        <button type="button" class="admin-action-btn danger" ${deleteBtnAction}>
+                            🗑 Delete
+                        </button>
+                    </div>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
+function escapeAdminHtml(str) {
+    if (!str) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
+function escapeAdminString(str) {
+    if (!str) return '';
+    return String(str).replace(/'/g, "\\'");
+}
+
+function filterAdminsTable() {
+    const searchTerm = (document.getElementById('adminSearchInput')?.value || '').toLowerCase().trim();
+    const statusFilter = (document.getElementById('adminStatusFilter')?.value || 'all').toLowerCase();
+
+    const filtered = (window.adminListData || []).filter(admin => {
+        const matchesSearch = !searchTerm ||
+            (admin.name && admin.name.toLowerCase().includes(searchTerm)) ||
+            (admin.email && admin.email.toLowerCase().includes(searchTerm)) ||
+            (admin.department && admin.department.toLowerCase().includes(searchTerm)) ||
+            (admin.location && admin.location.toLowerCase().includes(searchTerm));
+
+        const isActive = admin.is_active === 1 || admin.is_active === true;
+        let matchesStatus = true;
+        if (statusFilter === 'active') matchesStatus = isActive;
+        else if (statusFilter === 'inactive') matchesStatus = !isActive;
+
+        return matchesSearch && matchesStatus;
+    });
+
+    renderAdminTable(filtered);
+}
+
+function renderAdminAuditLogs(events) {
+    const listEl = document.getElementById('adminRecentActivityList');
+    if (!listEl) return;
+
+    if (!Array.isArray(events) || events.length === 0) {
+        listEl.innerHTML = '<div style="color:#64748b; padding:10px;">No recent security events recorded.</div>';
+        return;
+    }
+
+    listEl.innerHTML = events.map(evt => {
+        const title = evt.message || evt.action || 'System health verification';
+        const source = evt.source_name || evt.admin || (evt.source_type ? `${evt.source_type} Service` : 'System Service');
+        const severity = String(evt.severity || 'info').toLowerCase();
+        const time = evt.created_at || evt.timestamp || 'Recent';
+
+        let typeClass = 'info';
+        let icon = 'ℹ';
+        if (severity === 'critical' || severity === 'danger') {
+            typeClass = 'critical';
+            icon = '!';
+        } else if (severity === 'warning') {
+            typeClass = 'warning';
+            icon = '⚠';
+        } else if (severity === 'good' || severity === 'success' || severity === 'low') {
+            typeClass = 'good';
+            icon = '✓';
+        } else if (evt.type === 'admin_management') {
+            typeClass = 'warning';
+            icon = '🛡';
+        }
+
+        return `
+            <div class="alert ${typeClass}" style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <i>${icon}</i>
+                    <div>
+                        <b style="color:#f8fafc; font-size:13px;">${escapeAdminHtml(title)}</b>
+                        <small style="color:#94a3b8; display:block; font-size:11px;">Source: ${escapeAdminHtml(source)} · Status: ${escapeAdminHtml(evt.severity || evt.status || 'Logged')}</small>
+                    </div>
+                </div>
+                <label style="font-size:11px; color:#64748b;">${escapeAdminHtml(time)}</label>
+            </div>
+        `;
+    }).join('');
+}
+
+function openAddAdminModal() {
+    const modal = document.getElementById('addAdminModal');
+    if (modal) {
+        modal.style.display = 'flex';
+        const alertBox = document.getElementById('addAdminAlert');
+        if (alertBox) alertBox.style.display = 'none';
+        const form = document.getElementById('addAdminForm');
+        if (form) form.reset();
+        document.getElementById('newAdminName')?.focus();
+    }
+}
+
+function closeAddAdminModal() {
+    const modal = document.getElementById('addAdminModal');
+    if (modal) modal.style.display = 'none';
+}
+
+function toggleNewAdminPasswordVisibility() {
+    const pwdInput = document.getElementById('newAdminPassword');
+    if (!pwdInput) return;
+    pwdInput.type = (pwdInput.type === 'password') ? 'text' : 'password';
+}
+
+async function submitCreateAdmin(event) {
+    if (event) event.preventDefault();
+
+    const name = document.getElementById('newAdminName')?.value.trim();
+    const email = document.getElementById('newAdminEmail')?.value.trim();
+    const password = document.getElementById('newAdminPassword')?.value;
+    const department = document.getElementById('newAdminDept')?.value.trim() || 'IT & Network';
+    const location = document.getElementById('newAdminLocation')?.value.trim() || 'Neo Metaliks';
+    const phone = document.getElementById('newAdminPhone')?.value.trim() || null;
+
+    const alertBox = document.getElementById('addAdminAlert');
+    const submitBtn = document.getElementById('createAdminSubmitBtn');
+
+    const showAlert = (msg, isError = true) => {
+        if (!alertBox) return;
+        alertBox.style.display = 'block';
+        alertBox.style.background = isError ? 'rgba(239, 68, 68, 0.15)' : 'rgba(16, 185, 129, 0.15)';
+        alertBox.style.color = isError ? '#f87171' : '#34d399';
+        alertBox.style.border = isError ? '1px solid rgba(239, 68, 68, 0.3)' : '1px solid rgba(16, 185, 129, 0.3)';
+        alertBox.textContent = msg;
+    };
+
+    if (!name || !email || !password) {
+        showAlert('Please fill in all required fields.');
+        return;
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+        showAlert('Please enter a valid email address.');
+        return;
+    }
+
+    if (password.length < 6) {
+        showAlert('Password must be at least 6 characters.');
+        return;
+    }
+
+    const token = localStorage.getItem('access_token');
+    if (!token) {
+        showAlert('Authentication session missing. Please log in.');
+        return;
+    }
+
+    const apiBase = (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL !== undefined)
+        ? window.APP_CONFIG.API_BASE_URL
+        : (window.location.port === '8081' ? '' : 'http://' + window.location.hostname + ':8000');
+
+    if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = 'Creating...';
+    }
+
+    try {
+        const response = await fetch(apiBase + '/api/admin/create', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + token
+            },
+            body: JSON.stringify({ name, email, password, department, location, phone })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok || !data.success) {
+            showAlert(data.detail || data.message || 'Failed to create administrator account.');
+            return;
+        }
+
+        showToast(`✅ Administrator "${name}" created successfully`);
+        closeAddAdminModal();
+        await loadAdminPanelData();
+
+    } catch (err) {
+        console.error('Error creating admin:', err);
+        showAlert('Server or network connection error.');
+    } finally {
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = 'Create Administrator';
+        }
+    }
+}
+
+async function toggleAdminStatus(adminId, newStatus, adminName) {
+    const actionText = newStatus ? 'activate' : 'deactivate';
+    if (!confirm(`Are you sure you want to ${actionText} administrator "${adminName}"?`)) {
+        return;
+    }
+
+    const token = localStorage.getItem('access_token');
+    if (!token) {
+        showToast('⚠️ Session expired. Please log in.');
+        return;
+    }
+
+    const apiBase = (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL !== undefined)
+        ? window.APP_CONFIG.API_BASE_URL
+        : (window.location.port === '8081' ? '' : 'http://' + window.location.hostname + ':8000');
+
+    try {
+        const response = await fetch(`${apiBase}/api/admin/${adminId}/status`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + token
+            },
+            body: JSON.stringify({ is_active: newStatus ? 1 : 0 })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok || !data.success) {
+            showToast(`⚠️ ${data.detail || data.message || 'Status update failed'}`);
+            return;
+        }
+
+        showToast(`✅ Administrator "${adminName}" status updated`);
+        await loadAdminPanelData();
+
+    } catch (err) {
+        console.error('Error toggling admin status:', err);
+        showToast('⚠️ Network error updating administrator status');
+    }
+}
+
+async function deleteAdmin(adminId, adminName) {
+    if (!confirm(`⚠️ PERMANENT ACTION: Are you sure you want to delete administrator "${adminName}"? This action cannot be undone.`)) {
+        return;
+    }
+
+    const token = localStorage.getItem('access_token');
+    if (!token) {
+        showToast('⚠️ Session expired. Please log in.');
+        return;
+    }
+
+    const apiBase = (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL !== undefined)
+        ? window.APP_CONFIG.API_BASE_URL
+        : (window.location.port === '8081' ? '' : 'http://' + window.location.hostname + ':8000');
+
+    try {
+        const response = await fetch(`${apiBase}/api/admin/${adminId}`, {
+            method: 'DELETE',
+            headers: {
+                'Authorization': 'Bearer ' + token
+            }
+        });
+
+        const data = await response.json();
+
+        if (!response.ok || !data.success) {
+            showToast(`⚠️ ${data.detail || data.message || 'Admin deletion failed'}`);
+            return;
+        }
+
+        showToast(`✅ Administrator "${adminName}" deleted successfully`);
+        await loadAdminPanelData();
+
+    } catch (err) {
+        console.error('Error deleting admin:', err);
+        showToast('⚠️ Network error deleting administrator');
+    }
+}
+
+// Window bindings
+window.openAdminPanel = openAdminPanel;
+window.loadAdminPanelData = loadAdminPanelData;
+window.openAddAdminModal = openAddAdminModal;
+window.closeAddAdminModal = closeAddAdminModal;
+window.toggleNewAdminPasswordVisibility = toggleNewAdminPasswordVisibility;
+window.submitCreateAdmin = submitCreateAdmin;
+window.toggleAdminStatus = toggleAdminStatus;
+window.deleteAdmin = deleteAdmin;
+window.filterAdminsTable = filterAdminsTable;
 
 

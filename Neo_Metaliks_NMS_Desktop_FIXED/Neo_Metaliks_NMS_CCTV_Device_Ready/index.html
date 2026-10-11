@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Neo Metaliks | NMS Control Center</title>
 <link rel="stylesheet" href="style.css">
+<script src="config.js"></script>
 <script>
 (async function checkAuthentication() {
 
@@ -16,9 +17,12 @@
     }
 
     try {
+        const apiBase = (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL !== undefined)
+            ? window.APP_CONFIG.API_BASE_URL
+            : (window.location.port === "8081" ? "" : "http://" + window.location.hostname + ":8000");
 
         const response = await fetch(
-            "http://" + window.location.hostname + ":8000/api/auth/me",
+            apiBase + "/api/auth/me",
             {
                 method: "GET",
                 headers: {
@@ -84,7 +88,7 @@
        <a href="#reports" class="nav" data-page="reports"><span>▥</span>Reports</a>
       <div class="nav-title">SYSTEM</div>
       <a href="#settings" class="nav" data-page="settings"><span>⚙</span>Settings</a>
-
+      <a href="#admin-panel" class="nav" data-page="admin-panel"><span>🛡️</span>Admin Panel</a>
     </nav>
     <div class="side-bottom">
       <span class="online-dot"></span>
@@ -121,6 +125,10 @@
             <small>System Admin</small>
         </div>
     </div>
+
+    <button type="button" class="admin-menu-item" onclick="openAdminPanel()">
+        🛡️ <span>Admin Panel</span>
+    </button>
 
     <button type="button" class="admin-menu-item" onclick="openAdminProfile()">
         👤 <span>Admin Profile</span>
@@ -1829,6 +1837,205 @@
       </div>
     </section>
 
+      <!-- ADMIN PANEL -->
+      <section class="page" id="admin-panel">
+        <div class="page-top">
+          <div>
+            <span class="crumb">ADMINISTRATION & SECURITY</span>
+            <h2>Admin Management & System Health</h2>
+            <p>Manage system administrators, verify access credentials, and monitor core infrastructure telemetry.</p>
+          </div>
+          <div class="nms-page-actions">
+            <button type="button" class="btn secondary" id="adminRefreshTelemetryBtn" onclick="loadAdminPanelData()">
+              ↻ Refresh Telemetry
+            </button>
+            <button type="button" class="btn primary" id="openAddAdminBtn" onclick="openAddAdminModal()">
+              ＋ Add Administrator
+            </button>
+          </div>
+        </div>
+
+        <!-- 4 KPI CARDS -->
+        <div class="stats admin-kpi-grid">
+          <div class="stat">
+            <div class="stat-icon blue">🛡️</div>
+            <div>
+              <small>Total Administrators</small>
+              <strong id="adminPanelTotalCount">--</strong>
+              <span class="positive">Configured in DB</span>
+            </div>
+          </div>
+          <div class="stat">
+            <div class="stat-icon green">🟢</div>
+            <div>
+              <small>Active Accounts</small>
+              <strong id="adminPanelActiveCount">--</strong>
+              <span class="positive" id="adminPanelActivePercent">100% Operational</span>
+            </div>
+          </div>
+          <div class="stat">
+            <div class="stat-icon purple" style="background:rgba(168,85,247,0.15); color:#c084fc;">⚡</div>
+            <div>
+              <small>Backend Service</small>
+              <strong id="adminPanelBackendStatus" style="font-size:18px;">FastAPI Online</strong>
+              <span class="positive" id="adminPanelBackendSub">Port 8000 (Proxy 8081)</span>
+            </div>
+          </div>
+          <div class="stat">
+            <div class="stat-icon amber">🗄️</div>
+            <div>
+              <small>Database Connectivity</small>
+              <strong id="adminPanelDbStatus" style="font-size:18px;">Connected</strong>
+              <span class="positive" id="adminPanelDbSub">MySQL Pool Active</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- SYSTEM TELEMETRY STRIP -->
+        <div class="card admin-telemetry-panel" style="margin-bottom:20px; padding:16px 20px;">
+          <div style="display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:16px;">
+            <div style="display:flex; flex-wrap:wrap; align-items:center; gap:24px;">
+              <div class="telem-item">
+                <span style="font-size:11px; text-transform:uppercase; color:#64748b; letter-spacing:0.5px; display:block; margin-bottom:3px;">Ping Monitoring Engine</span>
+                <span id="telemPingStatus" style="font-size:13px; font-weight:600; color:#38bdf8; display:flex; align-items:center; gap:6px;">
+                  <span class="pulse-dot green"></span> Running (30s Cycle)
+                </span>
+              </div>
+              <div class="telem-item">
+                <span style="font-size:11px; text-transform:uppercase; color:#64748b; letter-spacing:0.5px; display:block; margin-bottom:3px;">CCTV Wall Engine</span>
+                <span id="telemCctvStatus" style="font-size:13px; font-weight:600; color:#34d399; display:flex; align-items:center; gap:6px;">
+                  <span class="pulse-dot green"></span> Running (60s Cycle)
+                </span>
+              </div>
+              <div class="telem-item">
+                <span style="font-size:11px; text-transform:uppercase; color:#64748b; letter-spacing:0.5px; display:block; margin-bottom:3px;">Desktop Agent Engine</span>
+                <span id="telemDesktopStatus" style="font-size:13px; font-weight:600; color:#a78bfa; display:flex; align-items:center; gap:6px;">
+                  <span class="pulse-dot green"></span> Running (45s Cycle)
+                </span>
+              </div>
+            </div>
+            <div style="display:flex; align-items:center; gap:12px;">
+              <span style="font-size:12px; color:#94a3b8;">Current Session:</span>
+              <span id="adminPanelCurrentAdminBadge" style="background:#1e293b; color:#38bdf8; border:1px solid #334155; padding:5px 12px; border-radius:6px; font-size:12px; font-weight:600;">
+                admin@neometaliks.com
+              </span>
+              <button type="button" class="btn secondary" style="padding:5px 12px; font-size:12px;" onclick="openAdminProfile()">
+                Profile Settings
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- SEARCH & FILTER TOOLBAR -->
+        <div class="toolbar" style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:16px;">
+          <div style="display:flex; gap:12px; flex:1; min-width:280px;">
+            <input id="adminSearchInput" placeholder="🔍 Search admin name, email, department or location..." oninput="filterAdminsTable()" style="flex:1;">
+            <select id="adminStatusFilter" onchange="filterAdminsTable()" style="min-width:140px;">
+              <option value="all">All Status</option>
+              <option value="active">Active Only</option>
+              <option value="inactive">Inactive Only</option>
+            </select>
+          </div>
+          <div style="color:#64748b; font-size:13px;">
+            Showing <strong id="adminVisibleCount" style="color:#f8fafc;">0</strong> admins
+          </div>
+        </div>
+
+        <!-- ADMIN TABLE -->
+        <div class="card table-wrap" style="margin-bottom:24px;">
+          <table id="adminTable">
+            <thead>
+              <tr>
+                <th style="width:60px;">ID</th>
+                <th>Administrator</th>
+                <th>Email Address</th>
+                <th>Department</th>
+                <th>Location</th>
+                <th>Account Status</th>
+                <th>Created Date</th>
+                <th style="text-align:right;">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="adminTableBody">
+              <tr>
+                <td colspan="8" style="text-align:center; padding:30px; color:#94a3b8;">
+                  Loading administrator records...
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- RECENT SECURITY & ADMIN ACTIVITIES -->
+        <div class="card" style="padding:20px;">
+          <div class="card-head" style="margin-bottom:14px; display:flex; justify-content:space-between; align-items:center;">
+            <div>
+              <h3 style="margin:0 0 4px 0; font-size:16px;">Recent Security & Admin Activity</h3>
+              <p style="margin:0; font-size:12px; color:#64748b;">System audit trail, administrative events and health status</p>
+            </div>
+            <span class="status good">● Live Audit Log</span>
+          </div>
+          <div id="adminRecentActivityList" class="alerts">
+            <!-- Dynamic events -->
+          </div>
+        </div>
+      </section>
+
+    </div>
+
+    <!-- ADD ADMINISTRATOR MODAL -->
+    <div id="addAdminModal" class="admin-modal-overlay" style="display:none;">
+      <div class="admin-modal-dialog">
+        <div class="admin-modal-head">
+          <div style="display:flex; align-items:center; gap:10px;">
+            <span style="font-size:22px;">🛡️</span>
+            <h3 style="margin:0; font-size:17px; color:#f8fafc;">Add New Administrator</h3>
+          </div>
+          <button type="button" class="btn-close" onclick="closeAddAdminModal()">✕</button>
+        </div>
+        <form id="addAdminForm" onsubmit="submitCreateAdmin(event)" style="padding:22px;">
+          <div id="addAdminAlert" style="display:none; padding:10px 14px; border-radius:8px; font-size:13px; margin-bottom:16px;"></div>
+
+          <div class="form-group" style="margin-bottom:14px;">
+            <label style="display:block; font-size:12px; color:#94a3b8; margin-bottom:6px; font-weight:600;">Full Name <span style="color:#ef4444;">*</span></label>
+            <input type="text" id="newAdminName" placeholder="e.g. Subrata Mukherjee" required style="width:100%; box-sizing:border-box;">
+          </div>
+
+          <div class="form-group" style="margin-bottom:14px;">
+            <label style="display:block; font-size:12px; color:#94a3b8; margin-bottom:6px; font-weight:600;">Email Address <span style="color:#ef4444;">*</span></label>
+            <input type="email" id="newAdminEmail" placeholder="admin@neometaliks.com" required style="width:100%; box-sizing:border-box;">
+          </div>
+
+          <div class="form-group" style="margin-bottom:14px;">
+            <label style="display:block; font-size:12px; color:#94a3b8; margin-bottom:6px; font-weight:600;">Password <span style="color:#ef4444;">*</span> (min. 6 characters)</label>
+            <div style="position:relative;">
+              <input type="password" id="newAdminPassword" placeholder="••••••••" required minlength="6" style="width:100%; box-sizing:border-box; padding-right:42px;">
+              <button type="button" onclick="toggleNewAdminPasswordVisibility()" style="position:absolute; right:12px; top:50%; transform:translateY(-50%); background:none; border:none; cursor:pointer; color:#94a3b8; font-size:16px; padding:0;">👁</button>
+            </div>
+          </div>
+
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:14px;">
+            <div class="form-group">
+              <label style="display:block; font-size:12px; color:#94a3b8; margin-bottom:6px; font-weight:600;">Department</label>
+              <input type="text" id="newAdminDept" placeholder="IT & Network" value="IT & Network" style="width:100%; box-sizing:border-box;">
+            </div>
+            <div class="form-group">
+              <label style="display:block; font-size:12px; color:#94a3b8; margin-bottom:6px; font-weight:600;">Location</label>
+              <input type="text" id="newAdminLocation" placeholder="Neo Metaliks Plant" value="Neo Metaliks" style="width:100%; box-sizing:border-box;">
+            </div>
+          </div>
+
+          <div class="form-group" style="margin-bottom:20px;">
+            <label style="display:block; font-size:12px; color:#94a3b8; margin-bottom:6px; font-weight:600;">Phone Number</label>
+            <input type="tel" id="newAdminPhone" placeholder="+91 9876543210" style="width:100%; box-sizing:border-box;">
+          </div>
+
+          <div style="display:flex; justify-content:flex-end; gap:10px; padding-top:12px; border-top:1px solid #1e293b;">
+            <button type="button" class="btn secondary" onclick="closeAddAdminModal()">Cancel</button>
+            <button type="submit" class="btn primary" id="createAdminSubmitBtn">Create Administrator</button>
+          </div>
+        </form>
+      </div>
     </div>
 
 <div id="toast"></div>
@@ -1845,9 +2052,12 @@
     }
 
     try {
+        const apiBase = (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL !== undefined)
+            ? window.APP_CONFIG.API_BASE_URL
+            : (window.location.port === "8081" ? "" : "http://" + window.location.hostname + ":8000");
 
         const response = await fetch(
-            "http://" + window.location.hostname + ":8000/api/auth/me",
+            apiBase + "/api/auth/me",
             {
                 method: "GET",
                 headers: {
