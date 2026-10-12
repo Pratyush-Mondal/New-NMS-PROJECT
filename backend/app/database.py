@@ -1,14 +1,18 @@
 import os
 import urllib.parse
 from pathlib import Path
-
+import threading
 import mysql.connector
+import mysql.connector.pooling
 from dotenv import load_dotenv
 
 
 # backend/.env
 ENV_PATH = Path(__file__).resolve().parents[1] / ".env"
 load_dotenv(ENV_PATH)
+
+_db_pool = None
+_pool_lock = threading.Lock()
 
 
 def _get_env(*names: str, default: str | None = None) -> str | None:
@@ -19,13 +23,9 @@ def _get_env(*names: str, default: str | None = None) -> str | None:
     return default
 
 
-def get_db_connection():
-    """Create a MySQL connection using env settings or cloud connection URL.
-
-    Supported variables:
-    DATABASE_URL, MYSQL_URL, MYSQL_HOST, MYSQL_PORT, MYSQL_USER, MYSQL_PASSWORD, MYSQL_DATABASE
-    """
-    # 1. Check for single cloud connection URL (TiDB, Aiven, Railway, Render)
+def _init_pool():
+    global _db_pool
+    # 1. Cloud connection URL (TiDB, Aiven, Railway, Render)
     db_url = _get_env("DATABASE_URL", "MYSQL_URL")
     if db_url:
         try:
@@ -35,47 +35,108 @@ def get_db_connection():
             user = parsed.username or "root"
             password = urllib.parse.unquote(parsed.password or "")
             database = (parsed.path or "").lstrip("/") or "neo_metaliks_nms"
-            
-            # Cloud databases (like TiDB, Aiven) often require SSL
-            try:
-                return mysql.connector.connect(
-                    host=host,
-                    port=port,
-                    user=user,
-                    password=password,
-                    database=database,
-                    autocommit=False,
-                    ssl_disabled=False
-                )
-            except Exception:
-                return mysql.connector.connect(
-                    host=host,
-                    port=port,
-                    user=user,
-                    password=password,
-                    database=database,
-                    autocommit=False
-                )
-        except Exception as e:
-            print(f"[DB Cloud URL Connection Failed] {e}")
 
-    # 2. Check individual environment variables
+            try:
+                _db_pool = mysql.connector.pooling.MySQLConnectionPool(
+                    pool_name="nms_main_pool",
+                    pool_size=10,
+                    pool_reset_session=True,
+                    host=host,
+                    port=port,
+                    user=user,
+                    password=password,
+                    database=database,
+                    ssl_disabled=False,
+                    connection_timeout=5
+                )
+                print("[DB Pool Initialized] Cloud connection pool ready (SSL)")
+                return
+            except Exception as e:
+                print(f"[DB Pool SSL init fallback]: {e}")
+                _db_pool = mysql.connector.pooling.MySQLConnectionPool(
+                    pool_name="nms_main_pool",
+                    pool_size=10,
+                    pool_reset_session=True,
+                    host=host,
+                    port=port,
+                    user=user,
+                    password=password,
+                    database=database,
+                    connection_timeout=5
+                )
+                print("[DB Pool Initialized] Cloud connection pool ready (plain)")
+                return
+        except Exception as e:
+            print(f"[DB Pool URL Init Failed] {e}")
+
+    # 2. Local environment variables
     host = _get_env("MYSQL_HOST", "DB_HOST", default="127.0.0.1")
     primary_port = int(_get_env("MYSQL_PORT", "DB_PORT", default="3306"))
     user = _get_env("MYSQL_USER", "DB_USER", default="root")
     password = _get_env("MYSQL_PASSWORD", "DB_PASSWORD", default="")
-    database = _get_env(
-        "MYSQL_DATABASE",
-        "DB_NAME",
-        default="neo_metaliks_nms",
-    )
+    database = _get_env("MYSQL_DATABASE", "DB_NAME", default="neo_metaliks_nms")
 
-    ports_to_try = [primary_port]
-    for alt in (3306, 3307):
-        if alt not in ports_to_try:
-            ports_to_try.append(alt)
+    try:
+        _db_pool = mysql.connector.pooling.MySQLConnectionPool(
+            pool_name="nms_main_pool",
+            pool_size=10,
+            pool_reset_session=True,
+            host=host,
+            port=primary_port,
+            user=user,
+            password=password,
+            database=database,
+            connection_timeout=5
+        )
+        print("[DB Pool Initialized] Local connection pool ready")
+    except Exception as e:
+        print(f"[DB Local Pool Init Failed] {e}")
 
-    for p in ports_to_try:
+
+def get_db_connection():
+    """Obtain a reusable MySQL connection from connection pool with fast fallbacks."""
+    global _db_pool
+    if _db_pool is None:
+        with _pool_lock:
+            if _db_pool is None:
+                _init_pool()
+
+    if _db_pool is not None:
+        try:
+            conn = _db_pool.get_connection()
+            if conn and conn.is_connected():
+                return conn
+            elif conn:
+                conn.reconnect(attempts=2, delay=1)
+                return conn
+        except Exception as e:
+            print(f"[DB Pool get_connection warning]: {e}")
+
+    # Fallback to direct cloud connection if pool is busy
+    db_url = _get_env("DATABASE_URL", "MYSQL_URL")
+    if db_url:
+        try:
+            parsed = urllib.parse.urlparse(db_url)
+            return mysql.connector.connect(
+                host=parsed.hostname or "127.0.0.1",
+                port=parsed.port or 3306,
+                user=parsed.username or "root",
+                password=urllib.parse.unquote(parsed.password or ""),
+                database=(parsed.path or "").lstrip("/") or "neo_metaliks_nms",
+                ssl_disabled=False,
+                connection_timeout=5
+            )
+        except Exception:
+            pass
+
+    # Final local fallback
+    host = _get_env("MYSQL_HOST", "DB_HOST", default="127.0.0.1")
+    primary_port = int(_get_env("MYSQL_PORT", "DB_PORT", default="3306"))
+    user = _get_env("MYSQL_USER", "DB_USER", default="root")
+    password = _get_env("MYSQL_PASSWORD", "DB_PASSWORD", default="")
+    database = _get_env("MYSQL_DATABASE", "DB_NAME", default="neo_metaliks_nms")
+
+    for p in (primary_port, 3307):
         try:
             return mysql.connector.connect(
                 host=host,
@@ -83,8 +144,8 @@ def get_db_connection():
                 user=user,
                 password=password,
                 database=database,
-                autocommit=False,
+                connection_timeout=3
             )
-        except (mysql.connector.Error, ValueError):
+        except Exception:
             continue
     return None

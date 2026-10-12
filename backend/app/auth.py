@@ -1,6 +1,7 @@
 import hashlib
 import hmac
 import os
+import time
 
 import jwt
 
@@ -113,6 +114,10 @@ def create_access_token(admin_id: int, email: str):
     )
 
 
+_ADMIN_CACHE = {}
+_ADMIN_CACHE_TIME = {}
+
+
 def get_admin_from_token(token: str):
     try:
         payload = jwt.decode(
@@ -126,10 +131,16 @@ def get_admin_from_token(token: str):
         if not admin_id:
             return None
 
+        # Check in-memory cache (30s TTL)
+        now = time.time()
+        cached = _ADMIN_CACHE.get(str(admin_id))
+        if cached and (now - _ADMIN_CACHE_TIME.get(str(admin_id), 0)) < 30:
+            return cached
+
         connection = get_db_connection()
 
         if connection is None:
-            return None
+            return cached or None
 
         cursor = None
 
@@ -157,8 +168,11 @@ def get_admin_from_token(token: str):
             admin = cursor.fetchone()
 
             if not admin or not admin["is_active"]:
+                _ADMIN_CACHE.pop(str(admin_id), None)
                 return None
 
+            _ADMIN_CACHE[str(admin_id)] = admin
+            _ADMIN_CACHE_TIME[str(admin_id)] = now
             return admin
 
         finally:
@@ -174,3 +188,4 @@ def get_admin_from_token(token: str):
         TypeError,
     ):
         return None
+

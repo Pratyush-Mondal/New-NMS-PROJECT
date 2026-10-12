@@ -2148,7 +2148,7 @@ def ping_device(
             command,
             capture_output=True,
             text=True,
-            timeout=3
+            timeout=1
         )
 
         output = result.stdout + result.stderr
@@ -2646,7 +2646,7 @@ def ping_camera(
             command,
             capture_output=True,
             text=True,
-            timeout=3
+            timeout=1
         )
 
         output = (
@@ -4693,10 +4693,8 @@ def serve_frontend_files(full_path: str):
 
     if os.path.isfile(target):
         headers = {}
-        if target.endswith((".html", ".js")):
-            headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
-            headers["Pragma"] = "no-cache"
-            headers["Expires"] = "0"
+        if target.endswith((".html", ".js", ".css")):
+            headers["Cache-Control"] = "no-cache"
         return FileResponse(target, headers=headers)
 
     login_fallback = os.path.join(FRONTEND_DIR, "login.html")

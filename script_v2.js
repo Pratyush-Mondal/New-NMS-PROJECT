@@ -72,9 +72,24 @@ function openPage(pageName, updateHash = true) {
     if (pageName === 'dashboard') {
         if (typeof drawChart === 'function') setTimeout(drawChart, 30);
         if (typeof loadDashboardStats === 'function') loadDashboardStats();
+    } else if (pageName === 'devices') {
+        if (typeof loadDevicesFromBackend === 'function') loadDevicesFromBackend();
+    } else if (pageName === 'cameras') {
+        if (typeof loadCamerasFromBackend === 'function') loadCamerasFromBackend();
+    } else if (pageName === 'desktops') {
+        if (typeof refreshDesktopData === 'function') refreshDesktopData();
+        if (typeof loadDesktopMonitoringState === 'function') loadDesktopMonitoringState();
+    } else if (pageName === 'network') {
+        if (typeof loadNetworkMap === 'function') loadNetworkMap();
+    } else if (pageName === 'alerts') {
+        if (typeof loadAlerts === 'function') loadAlerts();
+    } else if (pageName === 'reports') {
+        if (typeof generateNMSReport === 'function') generateNMSReport();
+    } else if (pageName === 'admin-profile-page') {
+        if (typeof loadAdminProfileData === 'function') loadAdminProfileData();
+    } else if (pageName === 'admin-panel') {
+        if (typeof loadAdminPanelData === 'function') loadAdminPanelData();
     }
-    if (pageName === 'admin-profile-page' && typeof loadAdminProfileData === 'function') loadAdminProfileData();
-    if (pageName === 'admin-panel' && typeof loadAdminPanelData === 'function') loadAdminPanelData();
     return true;
 }
 
@@ -123,15 +138,35 @@ function updateDashboardGreeting() {
     el.textContent = `${timeGreeting}, ${adminName}.`;
 }
 
-function refreshAll() {
+async function refreshAll() {
     const btn = document.getElementById('dashboardRefreshBtn') || document.querySelector('button[onclick="refreshAll()"]');
     if (btn) {
         btn.disabled = true;
         btn.innerHTML = '<span style="display:inline-block;animation:spin 0.8s linear infinite;">⟳</span> Refreshing...';
     }
-    setTimeout(() => {
-        window.location.reload();
-    }, 120);
+
+    try {
+        const promises = [];
+        if (typeof loadDashboardStats === 'function') promises.push(loadDashboardStats());
+        if (typeof loadDevicesFromBackend === 'function') promises.push(loadDevicesFromBackend());
+        if (typeof loadCamerasFromBackend === 'function') promises.push(loadCamerasFromBackend());
+        if (typeof refreshDesktopData === 'function') promises.push(refreshDesktopData());
+        if (typeof loadDesktopMonitoringState === 'function') promises.push(loadDesktopMonitoringState());
+        if (typeof loadNetworkMap === 'function') promises.push(loadNetworkMap());
+        if (typeof loadAlerts === 'function') promises.push(loadAlerts());
+
+        await Promise.allSettled(promises);
+        if (typeof updateDashboardGreeting === 'function') updateDashboardGreeting();
+        if (typeof drawChart === 'function') setTimeout(drawChart, 30);
+        if (typeof toast === 'function') toast('✅ Dashboard and infrastructure data refreshed');
+    } catch (err) {
+        console.error('Dashboard refresh error:', err);
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = '↻ Refresh';
+        }
+    }
 }
 
 window.refreshAll = refreshAll;
@@ -7107,79 +7142,34 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 // ---------------------------
 
-// --- BACKGROUND EXPLICIT PINGING TASKS ---
-let devicePingIntervalId = null;
-let cameraPingIntervalId = null;
+// --- BACKGROUND STATUS SYNC TASKS ---
+let syncIntervalId = null;
 
 function startBackgroundPinging() {
-    if (devicePingIntervalId) clearInterval(devicePingIntervalId);
-    if (cameraPingIntervalId) clearInterval(cameraPingIntervalId);
+    if (syncIntervalId) clearInterval(syncIntervalId);
 
-    const netSelect = document.getElementById('networkInterval');
-    let netInterval = netSelect && netSelect.value ? parseInt(netSelect.value) : 10;
-    if (isNaN(netInterval) || netInterval < 5) netInterval = 5;
-
-    const camSelect = document.getElementById('cameraInterval');
-    let camInterval = camSelect && camSelect.value ? parseInt(camSelect.value) : 30;
-    if (isNaN(camInterval) || camInterval < 5) camInterval = 5;
-
-    devicePingIntervalId = setInterval(async () => {
+    // Smooth status sync every 30 seconds without flooding the cloud server
+    syncIntervalId = setInterval(async () => {
         if (localStorage.getItem('adminLoggedIn') !== 'true') return;
-        if (typeof backendDevices !== 'undefined' && Array.isArray(backendDevices)) {
-            for (const d of backendDevices) {
-                // Ping devices with monitoring_enabled
-                if (d.monitoring_enabled == 1 || d.monitoring_enabled === true || d.monitoring_enabled === 'true') {
-                    if (typeof pingDeviceFromFrontend === 'function') {
-                        pingDeviceFromFrontend(d.id, { silent: true }).catch(e => console.error(e));
-                    }
-                }
+        const page = window.currentPage || document.querySelector('.page.active')?.id || 'dashboard';
+        try {
+            if (page === 'dashboard' && typeof loadDashboardStats === 'function') {
+                await loadDashboardStats();
+            } else if (page === 'devices' && typeof loadDevicesFromBackend === 'function') {
+                await loadDevicesFromBackend();
+            } else if (page === 'cameras' && typeof loadCamerasFromBackend === 'function') {
+                await loadCamerasFromBackend();
+            } else if (page === 'desktops' && typeof refreshDesktopData === 'function') {
+                await refreshDesktopData();
             }
+        } catch (e) {
+            console.warn('Background sync warning:', e);
         }
-    }, netInterval * 1000);
-
-    // Maintain last check times for each camera
-    if (!window.cameraLastCheckTimes) window.cameraLastCheckTimes = {};
-    
-    cameraPingIntervalId = setInterval(async () => {
-        if (localStorage.getItem('adminLoggedIn') !== 'true') return;
-        
-        const camSelect = document.getElementById('cameraInterval');
-        let currentCamInterval = camSelect && camSelect.value ? parseInt(camSelect.value) : 30;
-        if (isNaN(currentCamInterval) || currentCamInterval < 5) currentCamInterval = 5;
-        
-        const retrySelect = document.getElementById('cameraRetryInterval');
-        let currentRetryInterval = retrySelect && retrySelect.value ? parseInt(retrySelect.value) : 120;
-        if (isNaN(currentRetryInterval) || currentRetryInterval < 5) currentRetryInterval = 30;
-
-        const now = Date.now();
-
-        if (typeof backendCameras !== 'undefined' && Array.isArray(backendCameras)) {
-            for (const c of backendCameras) {
-                if (c.monitoring_enabled == 1 || c.monitoring_enabled === true || c.monitoring_enabled === 'true') {
-                    const status = String(c.status || '').toLowerCase();
-                    const intervalToUse = (status === 'offline' || status === 'unreachable' || status === 'unknown') ? currentRetryInterval : currentCamInterval;
-                    
-                    const last = window.cameraLastCheckTimes[c.id] || 0;
-                    if (now - last >= intervalToUse * 1000) {
-                        window.cameraLastCheckTimes[c.id] = now;
-                        if (typeof pingCameraFromFrontend === 'function') {
-                            pingCameraFromFrontend(c.id, { silent: true }).catch(e => console.error(e));
-                        }
-                    }
-                }
-            }
-        }
-    }, 1000); // Check every second, but respect the specific camera intervals
+    }, 30000);
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-    setTimeout(startBackgroundPinging, 4000); // Start after initial load
-    
-    const netSelect = document.getElementById('networkInterval');
-    if (netSelect) netSelect.addEventListener('change', startBackgroundPinging);
-    
-    const camSelect = document.getElementById('cameraInterval');
-    if (camSelect) camSelect.addEventListener('change', startBackgroundPinging);
+    setTimeout(startBackgroundPinging, 5000);
 });
 // -----------------------------------------
 
