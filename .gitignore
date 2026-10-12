@@ -36,6 +36,8 @@ out.txt
 ngrok.exe
 ngrok.zip
 cloudflared.exe
+config.yml
+Neo_Metaliks_NMS_Desktop_FIXED/Neo_Metaliks_NMS_CCTV_Device_Ready/uploads/
 
 # Temporary scratch and patch scripts
 /fix*.py
