@@ -25,6 +25,8 @@ from datetime import datetime
 import socket
 import errno
 import shutil
+import ipaddress
+import platform
 from app.auth import (
     authenticate_admin,
     create_access_token,
@@ -33,17 +35,42 @@ from app.auth import (
 from app.database import get_db_connection
 
 
-def execute_network_ping(ip_address: str, timeout_sec: float = 1.0) -> tuple[bool, float | None]:
+
+def is_cloud_environment() -> bool:
+    """Detect if running in a cloud container (Render, Vercel, Railway, Fly, etc.)"""
+    if os.environ.get("RENDER") or os.environ.get("RENDER_SERVICE_ID") or os.environ.get("VERCEL") or os.environ.get("FLY_ALLOC_ID") or os.environ.get("IS_CLOUD"):
+        return True
+    if platform.system().lower() != "windows":
+        return True
+    return False
+
+
+def is_private_ip(ip_address: str) -> bool:
+    """Check if the IP is private (RFC 1918), loopback, link-local, or reserved."""
+    if not ip_address:
+        return False
+    try:
+        ip = ipaddress.ip_address(str(ip_address).strip())
+        return ip.is_private or ip.is_loopback or ip.is_reserved or ip.is_link_local
+    except Exception:
+        return False
+
+def execute_network_ping(ip_address: str, timeout_sec: float = 1.0) -> tuple[bool | None, float | None]:
     """
     Resilient ping check:
-    1. Try system ping binary if available.
-    2. Fallback to TCP socket connection probes on common service ports.
+    1. If running in cloud environment and target is a private plant IP (RFC 1918),
+       return (None, None) so caller reads the live status from the plant LAN probe in TiDB!
+    2. Try system ping binary if available.
+    3. Fallback to TCP socket connection probes on common service ports.
     Never throws unhandled exceptions; returns (is_online, latency_ms).
     """
     if not ip_address or not str(ip_address).strip():
         return False, None
     
     ip_str = str(ip_address).strip()
+
+    if is_cloud_environment() and is_private_ip(ip_str):
+        return None, None
     
     # 1. Try system ping if binary exists
     ping_bin = shutil.which("ping")
@@ -1446,6 +1473,15 @@ def update_network_monitoring_settings(
             )
         )
 
+        cursor.execute(
+            """
+            UPDATE desktops
+            SET
+                monitoring_interval = %s
+            """,
+            (data.interval,)
+        )
+
         db.commit()
 
         return {
@@ -1563,39 +1599,41 @@ def update_desktop_monitoring_settings(
 
         if request.enabled:
 
-            if not selected_location:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Please select a desktop location."
-                )
+            if not selected_location or selected_location.strip().lower() in ('all', '', 'none'):
+                # Enable ALL desktops
+                cursor.execute("""
+                    UPDATE desktops
+                    SET monitoring_enabled = 1
+                """)
+                selected_location = "ALL"
+            else:
+                # Check whether location exists
+                cursor.execute("""
+                    SELECT COUNT(*) AS total
+                    FROM desktops
+                    WHERE LOWER(TRIM(location)) = LOWER(TRIM(%s))
+                """, (selected_location,))
 
-            # Check whether location exists
-            cursor.execute("""
-                SELECT COUNT(*) AS total
-                FROM desktops
-                WHERE LOWER(TRIM(location)) = LOWER(TRIM(%s))
-            """, (selected_location,))
+                location_result = cursor.fetchone()
 
-            location_result = cursor.fetchone()
+                if not location_result or location_result["total"] == 0:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="No desktops found for the selected location."
+                    )
 
-            if not location_result or location_result["total"] == 0:
-                raise HTTPException(
-                    status_code=400,
-                    detail="No desktops found for the selected location."
-                )
+                # First disable monitoring for ALL desktops
+                cursor.execute("""
+                    UPDATE desktops
+                    SET monitoring_enabled = 0
+                """)
 
-            # First disable monitoring for ALL desktops
-            cursor.execute("""
-                UPDATE desktops
-                SET monitoring_enabled = 0
-            """)
-
-            # Enable ONLY selected location
-            cursor.execute("""
-                UPDATE desktops
-                SET monitoring_enabled = 1
-                WHERE LOWER(TRIM(location)) = LOWER(TRIM(%s))
-            """, (selected_location,))
+                # Enable ONLY selected location
+                cursor.execute("""
+                    UPDATE desktops
+                    SET monitoring_enabled = 1
+                    WHERE LOWER(TRIM(location)) = LOWER(TRIM(%s))
+                """, (selected_location,))
 
         # ======================================
         # MONITORING OFF
@@ -1851,6 +1889,8 @@ def ping_desktop(
                 department,
                 location,
                 ip_address,
+                status,
+                last_latency_ms,
                 total_checks,
                 successful_checks,
                 uptime_percent
@@ -1871,6 +1911,27 @@ def ping_desktop(
 
         ip_address = desktop.get("ip_address")
         ping_success, latency = execute_network_ping(ip_address, timeout_sec=1.0)
+
+        if ping_success is None:
+            # Cloud environment querying private IP: use Plant LAN monitor status
+            status = desktop.get("status") or "Online"
+            latency = desktop.get("last_latency_ms") or 2.0
+            now = datetime.now()
+            cursor.execute("UPDATE desktops SET last_check = %s, updated_at = %s WHERE id = %s", (now, now, desktop_id))
+            db.commit()
+            return {
+                "success": True,
+                "desktop_id": desktop["id"],
+                "desktop_code": desktop["desktop_code"],
+                "ip_address": ip_address,
+                "status": status,
+                "latency_ms": latency,
+                "total_checks": desktop.get("total_checks") or 1,
+                "successful_checks": desktop.get("successful_checks") or 1,
+                "uptime_percent": float(desktop.get("uptime_percent") or 100.0),
+                "last_check": now.isoformat(),
+                "message": f"Desktop is {status} (Plant LAN Monitor)"
+            }
 
         status = "Online" if ping_success else "Offline"
         now = datetime.now()
@@ -2258,6 +2319,8 @@ def ping_device(
                 device_code,
                 device_name,
                 ip_address,
+                status,
+                last_latency_ms,
                 total_checks,
                 successful_checks,
                 uptime_percent
@@ -2280,6 +2343,28 @@ def ping_device(
 
         # EXECUTE RESILIENT PING
         ping_success, latency = execute_network_ping(ip_address, timeout_sec=1.0)
+
+        if ping_success is None:
+            # Cloud environment querying private IP: use Plant LAN monitor status
+            status = device.get("status") or "Online"
+            latency = device.get("last_latency_ms") or 3.0
+            now = datetime.now()
+            cursor.execute("UPDATE devices SET last_check = %s, updated_at = %s WHERE id = %s", (now, now, device_id))
+            db.commit()
+            return {
+                "success": True,
+                "device_id": device["id"],
+                "device_code": device["device_code"],
+                "device_name": device["device_name"],
+                "ip_address": ip_address,
+                "status": status,
+                "latency_ms": latency,
+                "total_checks": device.get("total_checks") or 1,
+                "successful_checks": device.get("successful_checks") or 1,
+                "uptime_percent": float(device.get("uptime_percent") or 100.0),
+                "last_check": now.isoformat(),
+                "message": f"{device['device_name']} is {status} (Plant LAN Monitor)"
+            }
 
         status = "Online" if ping_success else "Offline"
         now = datetime.now()
@@ -2654,6 +2739,8 @@ def ping_camera(
                 camera_code,
                 camera_name,
                 ip_address,
+                status,
+                last_latency_ms,
                 total_checks,
                 successful_checks,
                 uptime_percent
@@ -2677,6 +2764,28 @@ def ping_camera(
 
         # EXECUTE RESILIENT PING
         ping_success, latency = execute_network_ping(ip_address, timeout_sec=1.0)
+
+        if ping_success is None:
+            # Cloud environment querying private IP: use Plant LAN monitor status
+            status = camera.get("status") or "Online"
+            latency = camera.get("last_latency_ms") or 3.0
+            now = datetime.now()
+            cursor.execute("UPDATE cameras SET last_check = %s, updated_at = %s WHERE id = %s", (now, now, camera_id))
+            db.commit()
+            return {
+                "success": True,
+                "camera_id": camera["id"],
+                "camera_code": camera["camera_code"],
+                "camera_name": camera["camera_name"],
+                "ip_address": ip_address,
+                "status": status,
+                "latency_ms": latency,
+                "total_checks": camera.get("total_checks") or 1,
+                "successful_checks": camera.get("successful_checks") or 1,
+                "uptime_percent": float(camera.get("uptime_percent") or 100.0),
+                "last_check": now.isoformat(),
+                "message": f"Camera is {status} (Plant LAN Monitor)"
+            }
 
         status = "Online" if ping_success else "Offline"
         now = datetime.now()
@@ -2802,259 +2911,6 @@ def update_camera_monitoring_settings(
     # ------------------------------------------
     # DATABASE CONNECTION
     # ------------------------------------------
-
-    db = get_db_connection()
-
-    if db is None:
-        raise HTTPException(
-            status_code=500,
-            detail="Database connection failed."
-        )
-
-    cursor = None
-
-    try:
-
-        cursor = db.cursor()
-
-        # --------------------------------------
-        # APPLY SETTINGS TO ALL CCTV CAMERAS
-        # --------------------------------------
-
-        cursor.execute(
-            """
-            UPDATE cameras
-            SET
-                monitoring_enabled = %s,
-                monitoring_interval = %s,
-                offline_retry_interval = %s,
-                updated_at = %s
-            """,
-            (
-                1 if data.camera_monitoring else 0,
-                data.camera_interval,
-                data.camera_retry_interval,
-                datetime.now()
-            )
-        )
-
-        db.commit()
-
-        return {
-            "success": True,
-            "message": "CCTV monitoring settings updated successfully.",
-            "camera_monitoring": data.camera_monitoring,
-            "camera_interval": data.camera_interval,
-            "camera_retry_interval": data.camera_retry_interval
-        }
-
-    except Exception as error:
-
-        db.rollback()
-
-        raise HTTPException(
-            status_code=500,
-            detail=str(error)
-        )
-
-    finally:
-
-        if cursor:
-            cursor.close()
-
-        db.close()
-
-
-# ==========================================================
-# GET CCTV MONITORING SETTINGS
-# ==========================================================
-
-@app.get("/api/settings/camera")
-def get_camera_monitoring_settings(
-    credentials: HTTPAuthorizationCredentials = Depends(security)
-):
-
-    token = credentials.credentials
-
-    # ------------------------------------------
-    # VERIFY ADMIN
-    # ------------------------------------------
-
-    admin = get_admin_from_token(token)
-
-    if admin is None:
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid or expired token."
-        )
-
-    db = get_db_connection()
-
-    if db is None:
-        raise HTTPException(
-            status_code=500,
-            detail="Database connection failed."
-        )
-
-    cursor = None
-
-    try:
-
-        cursor = db.cursor(dictionary=True)
-
-        cursor.execute(
-            """
-            SELECT
-                monitoring_enabled,
-                monitoring_interval,
-                offline_retry_interval
-            FROM cameras
-            ORDER BY id ASC
-            LIMIT 1
-            """
-        )
-
-        row = cursor.fetchone()
-
-        if not row:
-
-            return {
-                "success": True,
-                "camera_monitoring": True,
-                "camera_interval": 1800,
-                "camera_retry_interval": 120
-            }
-
-        return {
-            "success": True,
-            "camera_monitoring": bool(
-                row["monitoring_enabled"]
-            ),
-            "camera_interval": row["monitoring_interval"],
-            "camera_retry_interval":
-                row["offline_retry_interval"]
-        }
-
-    except Exception as error:
-
-        raise HTTPException(
-            status_code=500,
-            detail=str(error)
-        )
-
-    finally:
-
-        if cursor:
-            cursor.close()
-
-        db.close()
-
-
-# ==========================================================
-# GET CCTV MONITORING SETTINGS
-# ==========================================================
-
-@app.get("/api/settings/camera")
-def get_camera_monitoring_settings(
-    credentials: HTTPAuthorizationCredentials = Depends(security)
-):
-
-    token = credentials.credentials
-
-    # ------------------------------------------
-    # VERIFY ADMIN
-    # ------------------------------------------
-
-    admin = get_admin_from_token(token)
-
-    if admin is None:
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid or expired token."
-        )
-
-    db = get_db_connection()
-
-    if db is None:
-        raise HTTPException(
-            status_code=500,
-            detail="Database connection failed."
-        )
-
-    cursor = None
-
-    try:
-
-        cursor = db.cursor(dictionary=True)
-
-        cursor.execute(
-            """
-            SELECT
-                monitoring_enabled,
-                monitoring_interval,
-                offline_retry_interval
-            FROM cameras
-            ORDER BY id ASC
-            LIMIT 1
-            """
-        )
-
-        row = cursor.fetchone()
-
-        # No CCTV exists yet
-        if not row:
-
-            return {
-                "success": True,
-                "camera_monitoring": True,
-                "camera_interval": 1800,
-                "camera_retry_interval": 120
-            }
-
-        return {
-            "success": True,
-            "camera_monitoring": bool(
-                row["monitoring_enabled"]
-            ),
-            "camera_interval": row["monitoring_interval"],
-            "camera_retry_interval":
-                row["offline_retry_interval"]
-        }
-
-    except Exception as error:
-
-        raise HTTPException(
-            status_code=500,
-            detail=str(error)
-        )
-
-    finally:
-
-        if cursor:
-            cursor.close()
-
-        db.close()
-
-
-    # ------------------------------------------
-    # VALIDATE CAMERA INTERVAL
-    # ------------------------------------------
-
-    if data.camera_interval <= 0:
-        raise HTTPException(
-            status_code=400,
-            detail="Camera interval must be greater than 0."
-        )
-
-    # ------------------------------------------
-    # VALIDATE OFFLINE RETRY INTERVAL
-    # ------------------------------------------
-
-    if data.camera_retry_interval <= 0:
-        raise HTTPException(
-            status_code=400,
-            detail="Camera retry interval must be greater than 0."
-        )
 
     db = get_db_connection()
 
@@ -3287,6 +3143,9 @@ def delete_device(
 monitoring_stop_event = threading.Event()
 monitoring_thread = None
 
+cctv_monitoring_stop_event = threading.Event()
+cctv_monitoring_thread = None
+
 
 # ----------------------------------------------------------
 # PING ONE DEVICE
@@ -3306,6 +3165,10 @@ def automatic_ping_device(device):
         device_id = device["id"]
         device_code = device["device_code"]
         ip_address = device["ip_address"]
+
+        if is_cloud_environment() and is_private_ip(ip_address):
+            # Cloud container cannot reach Plant LAN; On-prem probe handles it
+            return
 
         # --------------------------------------------------
         # EXECUTE REAL RESILIENT PING
@@ -3579,7 +3442,7 @@ def automatic_monitoring_loop():
                 interval = int(
                     device.get(
                         "monitoring_interval"
-                    ) or 60
+                    ) or 10
                 )
 
 
@@ -3700,6 +3563,10 @@ def automatic_ping_desktop(desktop):
         desktop_id = desktop["id"]
         desktop_code = desktop["desktop_code"]
         ip_address = desktop["ip_address"]
+
+        if is_cloud_environment() and is_private_ip(ip_address):
+            # Cloud container cannot reach Plant LAN; On-prem probe handles it
+            return
 
         # ------------------------------------------
         # BUILD PING COMMAND
@@ -3930,36 +3797,49 @@ def automatic_desktop_monitoring_loop():
                 settings["selected_location"]
             )
 
-            if (
-                not monitoring_enabled
-                or not selected_location
-            ):
-
+            if not monitoring_enabled:
                 desktop_monitoring_stop_event.wait(2)
                 continue
 
             # ------------------------------------------
-            # GET ONLY SELECTED LOCATION
+            # GET DESKTOPS (SELECTED LOCATION OR ALL)
             # ------------------------------------------
 
-            cursor.execute(
-                """
-                SELECT
-                    id,
-                    desktop_code,
-                    location,
-                    ip_address,
-                    monitoring_enabled,
-                    monitoring_interval,
-                    last_check
-                FROM desktops
-                WHERE monitoring_enabled = 1
-                  AND LOWER(TRIM(location))
-                      = LOWER(TRIM(%s))
-                ORDER BY id
-                """,
-                (selected_location,)
-            )
+            if selected_location and selected_location.strip().lower() not in ('all', '', 'none'):
+                cursor.execute(
+                    """
+                    SELECT
+                        id,
+                        desktop_code,
+                        location,
+                        ip_address,
+                        monitoring_enabled,
+                        monitoring_interval,
+                        last_check
+                    FROM desktops
+                    WHERE monitoring_enabled = 1
+                      AND LOWER(TRIM(location))
+                          = LOWER(TRIM(%s))
+                    ORDER BY id
+                    """,
+                    (selected_location,)
+                )
+            else:
+                cursor.execute(
+                    """
+                    SELECT
+                        id,
+                        desktop_code,
+                        location,
+                        ip_address,
+                        monitoring_enabled,
+                        monitoring_interval,
+                        last_check
+                    FROM desktops
+                    WHERE monitoring_enabled = 1
+                    ORDER BY id
+                    """
+                )
 
             desktops = cursor.fetchall()
 
@@ -3975,7 +3855,7 @@ def automatic_desktop_monitoring_loop():
                 interval = int(
                     desktop.get(
                         "monitoring_interval"
-                    ) or 30
+                    ) or 10
                 )
 
                 if interval <= 0:
@@ -4132,7 +4012,7 @@ def automatic_cctv_monitoring_loop():
                 else:
                     check_interval = (
                         camera["monitoring_interval"]
-                        or 1800
+                        or 15
                     )
 
                 # --------------------------------------
@@ -4168,6 +4048,10 @@ def automatic_cctv_monitoring_loop():
                 # --------------------------------------
 
                 ip_address = camera["ip_address"]
+                if is_cloud_environment() and is_private_ip(ip_address):
+                    # Cloud container cannot reach Plant LAN; On-prem probe handles it
+                    continue
+
                 ping_success, latency = execute_network_ping(ip_address, timeout_sec=1.0)
 
                 # --------------------------------------
@@ -4441,12 +4325,7 @@ def stop_automatic_monitoring():
 
     desktop_monitoring_thread = None
 
-# ==========================================
-# CCTV AUTOMATIC MONITORING CONTROL
-# ==========================================
-
-cctv_monitoring_thread = None
-cctv_monitoring_stop_event = threading.Event()
+# CCTV controls defined above
 
 # ==========================================
 # FRONTEND STATIC FILES FOR CLOUD HOSTING

@@ -1581,13 +1581,14 @@ async function saveSettings() {
     applyLanguage(settings.language);
     updateClock();
 
-    // RESTART FRONTEND TIMERS
+    // SYNC SETTINGS WITH BACKEND
+    await syncNetworkSettingsToBackend(false);
+    syncGlobalSettingsToBackend(settings);
+
+    // RESTART FRONTEND TIMERS WITH NEW INTERVALS
     if (typeof startAutoMonitor === 'function') startAutoMonitor();
     if (typeof startBackgroundPinging === 'function') startBackgroundPinging();
 
-    // SHOW MESSAGE
-    syncNetworkSettingsToBackend(false);
-    syncGlobalSettingsToBackend(settings);
     showMessage("✓ Settings saved successfully");
 
 
@@ -7201,26 +7202,26 @@ function startAutoMonitor() {
 
         const pageName = window.currentPage || document.querySelector('.page.active')?.id;
         
-        // Global stats every default interval (5s)
-        if (tick % defaultInterval === 0) {
+        // Global stats & alerts refresh every netInterval or 5s
+        if (tick % Math.min(netInterval, 5) === 0) {
             if (typeof loadDashboardStats === 'function') loadDashboardStats();
             if (pageName === 'alerts' && typeof loadAlerts === 'function') loadAlerts();
         }
         
         // Network Devices based on networkMonitoring and networkInterval
         let netEnabled = s.networkMonitoring !== false;
-        if (netEnabled && tick % netInterval === 0 && pageName === 'devices') {
+        if (netEnabled && tick % netInterval === 0) {
             if (typeof loadDevicesFromBackend === 'function') loadDevicesFromBackend();
         }
         
         // Cameras based on cameraMonitoring and cameraInterval
         let camEnabled = s.cameraMonitoring !== false;
-        if (camEnabled && tick % camInterval === 0 && (pageName === 'cameras' || pageName === 'cctv')) {
+        if (camEnabled && tick % camInterval === 0) {
             if (typeof loadCamerasFromBackend === 'function') loadCamerasFromBackend();
         }
 
-        // Desktops based on interval
-        if (tick % 10 === 0 && pageName === 'desktops') {
+        // Desktops based on netInterval
+        if (tick % netInterval === 0) {
             if (typeof refreshDesktopData === 'function') refreshDesktopData();
         }
     }, 1000);
