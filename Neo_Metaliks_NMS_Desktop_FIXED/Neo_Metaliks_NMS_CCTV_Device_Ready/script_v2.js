@@ -55,7 +55,10 @@ function openPage(pageName, updateHash = true) {
     const sidebar = document.getElementById('sidebar');
     if (sidebar) sidebar.classList.remove('open');
 
-    if (pageName === 'dashboard' && typeof drawChart === 'function') setTimeout(drawChart, 30);
+    if (pageName === 'dashboard') {
+        if (typeof drawChart === 'function') setTimeout(drawChart, 30);
+        if (typeof loadDashboardStats === 'function') loadDashboardStats();
+    }
     if (pageName === 'admin-profile-page' && typeof loadAdminProfileData === 'function') loadAdminProfileData();
     if (pageName === 'admin-panel' && typeof loadAdminPanelData === 'function') loadAdminPanelData();
     return true;
@@ -6796,6 +6799,10 @@ async function loadDashboardStats() {
                 }
                 window.lastKnownAlertCount = data.active_alerts;
 
+                const elTotal = document.getElementById('dashTotal');
+                const elOnline = document.getElementById('dashOnline');
+                const elAlerts = document.getElementById('dashAlerts');
+
                 if (elTotal) {
                     elTotal.textContent = data.total_devices;
                     const elTotalSub = elTotal.parentElement?.querySelector('span');
@@ -6825,15 +6832,6 @@ async function loadDashboardStats() {
                 if (sbAlerts) sbAlerts.textContent = data.active_alerts;
                 if (hrAlerts) hrAlerts.textContent = data.active_alerts;
                 if (typeof updateDashboardGreeting === 'function') updateDashboardGreeting();
-                
-                const elHealth = document.getElementById('dashHealthList');
-                if (elHealth && data.breakdown) {
-                    elHealth.innerHTML = `
-                        <div><span>📷 CCTV Cameras</span><b>${data.breakdown.cameras.online} / ${data.breakdown.cameras.total}</b></div>
-                        <div><span>🖧 Network Devices</span><b>${data.breakdown.devices.online} / ${data.breakdown.devices.total}</b></div>
-                        <div><span>🖥 Desktop Clients</span><b>${data.breakdown.desktops.online} / ${data.breakdown.desktops.total}</b></div>
-                    `;
-                }
                 
                 const hl = document.getElementById('dashHealthList');
                 if (hl && data.breakdown) {
