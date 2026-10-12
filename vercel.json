@@ -1,0 +1,21 @@
+{
+  "cleanUrls": true,
+  "rewrites": [
+    {
+      "source": "/",
+      "destination": "/Neo_Metaliks_NMS_Desktop_FIXED/Neo_Metaliks_NMS_CCTV_Device_Ready/login.html"
+    },
+    {
+      "source": "/login.html",
+      "destination": "/Neo_Metaliks_NMS_Desktop_FIXED/Neo_Metaliks_NMS_CCTV_Device_Ready/login.html"
+    },
+    {
+      "source": "/index.html",
+      "destination": "/Neo_Metaliks_NMS_Desktop_FIXED/Neo_Metaliks_NMS_CCTV_Device_Ready/index.html"
+    },
+    {
+      "source": "/:path((?!Neo_Metaliks_NMS_Desktop_FIXED).*\\..*)",
+      "destination": "/Neo_Metaliks_NMS_Desktop_FIXED/Neo_Metaliks_NMS_CCTV_Device_Ready/:path"
+    }
+  ]
+}

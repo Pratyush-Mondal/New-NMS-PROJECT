@@ -74,8 +74,19 @@ app.include_router(extra_router)
 # ROOT
 # =========================================================
 
+FRONTEND_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+    "Neo_Metaliks_NMS_Desktop_FIXED",
+    "Neo_Metaliks_NMS_CCTV_Device_Ready"
+)
+
+from starlette.responses import FileResponse
+
 @app.get("/")
 def root():
+    login_path = os.path.join(FRONTEND_DIR, "login.html")
+    if os.path.isfile(login_path):
+        return FileResponse(login_path)
     return {
         "success": True,
         "message": "Neo Metaliks NMS Backend is running"
@@ -4515,6 +4526,11 @@ app.include_router(extra_router)
 
 @app.on_event("startup")
 def start_automatic_monitoring():
+    try:
+        from app.auto_init_db import ensure_database_initialized
+        ensure_database_initialized()
+    except Exception as e:
+        print(f"[STARTUP DB INIT] {e}")
 
     global monitoring_thread
     global cctv_monitoring_thread
@@ -4658,3 +4674,28 @@ def stop_automatic_monitoring():
 
 cctv_monitoring_thread = None
 cctv_monitoring_stop_event = threading.Event()
+
+# ==========================================
+# FRONTEND STATIC FILES FOR CLOUD HOSTING
+# ==========================================
+@app.get("/{full_path:path}", include_in_schema=False)
+def serve_frontend_files(full_path: str):
+    if not full_path or full_path == "/":
+        target = os.path.join(FRONTEND_DIR, "login.html")
+    else:
+        clean = full_path.lstrip("/")
+        target = os.path.join(FRONTEND_DIR, clean)
+
+    if os.path.isfile(target):
+        headers = {}
+        if target.endswith((".html", ".js")):
+            headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+            headers["Pragma"] = "no-cache"
+            headers["Expires"] = "0"
+        return FileResponse(target, headers=headers)
+
+    login_fallback = os.path.join(FRONTEND_DIR, "login.html")
+    if os.path.isfile(login_fallback):
+        return FileResponse(login_fallback)
+
+    return {"detail": "Not Found"}
