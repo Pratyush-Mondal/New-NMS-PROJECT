@@ -126,7 +126,19 @@ function updateClock() {
 function clock() { updateClock() }
 setInterval(clock, 1000); clock();
 
-function toast(msg) { const t = document.getElementById('toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(window.tt); window.tt = setTimeout(() => t.classList.remove('show'), 2300) }
+function toast(msg) {
+    let t = document.getElementById('toast');
+    if (!t) {
+        t = document.createElement('div');
+        t.id = 'toast';
+        document.body.appendChild(t);
+    }
+    t.textContent = msg;
+    t.classList.add('show');
+    clearTimeout(window.tt);
+    window.tt = setTimeout(() => t.classList.remove('show'), 2800);
+}
+window.toast = toast;
 function showToast(msg) { toast(msg); }
 
 function updateDashboardGreeting() {
@@ -226,6 +238,7 @@ async function pingTest() {
     
     if (typeof toast === 'function') toast('Ping test completed successfully!');
 }
+window.pingTest = pingTest;
 
 let devices = [
     ['SW-01', 'Core Switch', '10.10.1.1', 'Data Center', 'Online', '99.98%'],
@@ -1394,7 +1407,7 @@ function get(id) {
 // LOAD SETTINGS
 // ------------------------------------------
 
-function loadSettings() {
+async function loadSettings() {
 
     let saved = localStorage.getItem("nmsSettings");
 
@@ -1408,6 +1421,29 @@ function loadSettings() {
         }
     } else {
         settings = { ...defaultSettings };
+    }
+
+    // Try fetching live backend settings if available
+    const token = localStorage.getItem("access_token");
+    if (token) {
+        try {
+            const apiBase = (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL !== undefined && window.APP_CONFIG.API_BASE_URL !== null)
+                            ? window.APP_CONFIG.API_BASE_URL : (typeof NMS_API_BASE !== 'undefined' ? NMS_API_BASE : "");
+            const [netRes, camRes] = await Promise.allSettled([
+                fetch(`${apiBase}/api/settings/network`, { headers: { "Authorization": `Bearer ${token}` } }).then(r => r.json()),
+                fetch(`${apiBase}/api/settings/camera`, { headers: { "Authorization": `Bearer ${token}` } }).then(r => r.json())
+            ]);
+            if (netRes.status === "fulfilled" && netRes.value && netRes.value.interval) {
+                settings.networkInterval = String(netRes.value.interval);
+                if (netRes.value.enabled !== undefined) settings.networkMonitoring = Boolean(netRes.value.enabled);
+            }
+            if (camRes.status === "fulfilled" && camRes.value && camRes.value.camera_interval) {
+                settings.cameraInterval = String(camRes.value.camera_interval);
+                if (camRes.value.camera_retry_interval) settings.cameraRetryInterval = camRes.value.camera_retry_interval;
+                if (camRes.value.camera_monitoring !== undefined) settings.cameraMonitoring = Boolean(camRes.value.camera_monitoring);
+            }
+            localStorage.setItem("nmsSettings", JSON.stringify(settings));
+        } catch (_) {}
     }
 
 
@@ -1462,8 +1498,9 @@ function loadSettings() {
     applyLanguage(settings.language);
 
 
-    console.log("NMS Settings Loaded");
+    console.log("NMS Settings Loaded", settings);
 }
+window.loadSettings = loadSettings;
 
 
 
@@ -1589,8 +1626,8 @@ async function saveSettings() {
     if (typeof startAutoMonitor === 'function') startAutoMonitor();
     if (typeof startBackgroundPinging === 'function') startBackgroundPinging();
 
-    showMessage("✓ Settings saved successfully");
-
+    toast(`✓ Settings saved: Network Interval ${settings.networkInterval}s | Camera Interval ${settings.cameraInterval}s`);
+    if (typeof showMessage === 'function') showMessage("✓ Settings saved successfully");
 
     console.log("Settings Saved:", settings);
 }
@@ -2716,11 +2753,20 @@ async function pingDesktopFromFrontend(desktopId, options = {}) {
         return null;
     }
 
+    const btn = document.querySelector(`button[onclick*="pingDesktopFromFrontend(${desktopId})"]`);
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = "&#9203; Pinging...";
+    }
+
     if (!options.silent) toast("Pinging desktop...");
+
+    const apiBase = (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL !== undefined && window.APP_CONFIG.API_BASE_URL !== null)
+                    ? window.APP_CONFIG.API_BASE_URL : (typeof NMS_API_BASE !== 'undefined' ? NMS_API_BASE : "");
 
     try {
         const response = await fetch(
-            `${NMS_API_BASE}/api/desktops/${desktopId}/ping`,
+            `${apiBase}/api/desktops/${desktopId}/ping`,
             {
                 method: "POST",
                 headers: {
@@ -2747,11 +2793,12 @@ async function pingDesktopFromFrontend(desktopId, options = {}) {
         }
 
         if (!options.silent) {
+            const isOnline = String(data.status).toLowerCase() === "online";
             const latencyText =
                 data.latency_ms !== null && data.latency_ms !== undefined
                     ? ` • ${data.latency_ms} ms`
                     : "";
-            toast(`${data.desktop_code} → ${data.status}${latencyText}`);
+            toast(`${isOnline ? "✅" : "❌"} ${data.desktop_code} → ${data.status}${latencyText}`);
         }
 
         return data;
@@ -2760,6 +2807,11 @@ async function pingDesktopFromFrontend(desktopId, options = {}) {
         console.error("Desktop Ping Error:", error);
         if (!options.silent) toast("Ping: " + (error.message || "Failed"));
         return null;
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = "PING";
+        }
     }
 }
 window.pingDesktopFromFrontend = pingDesktopFromFrontend;
@@ -4051,23 +4103,27 @@ async function pingCameraFromFrontend(cameraId, options = {}) {
         );
 
     if (!token) {
-
-        alert(
-            "Login required."
-        );
-
-        return;
+        if (!options.silent) toast("Login required.");
+        return null;
     }
 
+    const btn = document.querySelector(`.camera[data-camera-id="${cameraId}"] .device-ping-btn`) ||
+                document.querySelector(`button[onclick*="pingCameraFromFrontend(${cameraId})"]`);
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = "&#9203; Pinging...";
+    }
 
     if (!options.silent) toast("Pinging CCTV...");
 
+    const apiBase = (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL !== undefined && window.APP_CONFIG.API_BASE_URL !== null)
+                    ? window.APP_CONFIG.API_BASE_URL : (typeof NMS_API_BASE !== 'undefined' ? NMS_API_BASE : "");
 
     try {
 
         const response =
             await fetch(
-                `${window.APP_CONFIG.API_BASE_URL}/api/cameras/${cameraId}/ping`,
+                `${apiBase}/api/cameras/${cameraId}/ping`,
                 {
                     method: "POST",
 
@@ -4085,10 +4141,11 @@ async function pingCameraFromFrontend(cameraId, options = {}) {
             await response.json();
 
 
-        if (!response.ok) {
+        if (!response.ok || !data.success) {
 
             throw new Error(
                 data.detail ||
+                data.message ||
                 "CCTV ping failed."
             );
         }
@@ -4100,7 +4157,10 @@ async function pingCameraFromFrontend(cameraId, options = {}) {
         );
 
 
-        if (!options.silent) toast(`${data.camera_code} → ${data.status} | ${data.latency_ms ?? "-"} ms`);
+        if (!options.silent) {
+            const isOnline = String(data.status).toLowerCase() === "online";
+            toast(`${isOnline ? "✅" : "❌"} ${data.camera_code || "Camera"} → ${data.status} • ${data.latency_ms ?? "-"} ms`);
+        }
 
         const index = backendCameras.findIndex(c => Number(c.id) === Number(cameraId));
         if (index >= 0) {
@@ -4111,15 +4171,14 @@ async function pingCameraFromFrontend(cameraId, options = {}) {
             backendCameras[index].uptime_percent = data.uptime_percent;
             backendCameras[index].last_check = data.last_check;
             
-            if (options.silent) {
-                if (typeof renderBackendCameras === "function") {
-                    renderBackendCameras(backendCameras);
-                }
+            if (typeof renderBackendCameras === "function") {
+                renderBackendCameras(backendCameras);
             }
+        } else if (!options.silent) {
+            await loadCamerasFromBackend();
         }
 
-        if (!options.silent) await loadCamerasFromBackend();
-
+        return data;
 
     } catch (error) {
 
@@ -4129,8 +4188,15 @@ async function pingCameraFromFrontend(cameraId, options = {}) {
         );
 
         if (!options.silent) toast("CCTV Ping: " + (error.message || "Host offline or unreachable"));
+        return null;
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = "PING";
+        }
     }
 }
+window.pingCameraFromFrontend = pingCameraFromFrontend;
 
 
 // ---------------------------------------------------------
@@ -5712,11 +5778,20 @@ async function pingDeviceFromFrontend(deviceId, options = {}) {
         return null;
     }
 
+    const btn = document.querySelector(`button[onclick*="pingDeviceFromFrontend(${deviceId})"]`);
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = "&#9203; Pinging...";
+    }
+
     if (!options.silent) toast("Pinging device...");
+
+    const apiBase = (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL !== undefined && window.APP_CONFIG.API_BASE_URL !== null)
+                    ? window.APP_CONFIG.API_BASE_URL : (typeof NMS_API_BASE !== 'undefined' ? NMS_API_BASE : "");
 
     try {
         const response = await fetch(
-            `${NMS_API_BASE}/api/devices/${deviceId}/ping`,
+            `${apiBase}/api/devices/${deviceId}/ping`,
             {
                 method: "POST",
                 headers: {
@@ -5753,11 +5828,12 @@ async function pingDeviceFromFrontend(deviceId, options = {}) {
         console.log("Ping Result:", data);
 
         if (!options.silent) {
+            const isOnline = String(data.status).toLowerCase() === "online";
             const latencyText =
                 data.latency_ms !== null && data.latency_ms !== undefined
                     ? ` • ${data.latency_ms} ms`
                     : "";
-            toast(`${data.device_name} → ${data.status}${latencyText}`);
+            toast(`${isOnline ? "✅" : "❌"} ${data.device_name || data.device_code} → ${data.status}${latencyText}`);
         }
 
         return data;
@@ -5766,6 +5842,11 @@ async function pingDeviceFromFrontend(deviceId, options = {}) {
         console.error("Ping Error:", error);
         if (!options.silent) toast("Ping error: " + error.message);
         return null;
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = "PING";
+        }
     }
 }
 
@@ -7190,28 +7271,29 @@ function startAutoMonitor() {
     let tick = 0;
     
     autoMonitorIntervalId = setInterval(() => {
-        if (localStorage.getItem('adminLoggedIn') !== 'true') return;
+        const token = localStorage.getItem('access_token');
+        if (!token) return;
         tick++;
 
         // Read dynamically so it respects settings immediately without restart
         let s = {};
         try { s = JSON.parse(localStorage.getItem('nmsSettings') || '{}'); } catch(e){}
-        let netInterval = parseInt(s.networkInterval) || 10;
-        let camInterval = parseInt(s.cameraInterval) || 5;
-        let defaultInterval = 5;
+        let netInterval = Math.max(3, parseInt(s.networkInterval) || 10);
+        let camInterval = Math.max(3, parseInt(s.cameraInterval) || 15);
 
-        const pageName = window.currentPage || document.querySelector('.page.active')?.id;
+        const pageName = window.currentPage || document.querySelector('.page.active')?.id || 'dashboard';
         
-        // Global stats & alerts refresh every netInterval or 5s
-        if (tick % Math.min(netInterval, 5) === 0) {
+        // Global stats & alerts refresh every 5s
+        if (tick % 5 === 0) {
             if (typeof loadDashboardStats === 'function') loadDashboardStats();
             if (pageName === 'alerts' && typeof loadAlerts === 'function') loadAlerts();
         }
         
-        // Network Devices based on networkMonitoring and networkInterval
+        // Network Devices & Desktops based on networkMonitoring and networkInterval
         let netEnabled = s.networkMonitoring !== false;
         if (netEnabled && tick % netInterval === 0) {
             if (typeof loadDevicesFromBackend === 'function') loadDevicesFromBackend();
+            if (typeof refreshDesktopData === 'function') refreshDesktopData();
         }
         
         // Cameras based on cameraMonitoring and cameraInterval
@@ -7219,13 +7301,9 @@ function startAutoMonitor() {
         if (camEnabled && tick % camInterval === 0) {
             if (typeof loadCamerasFromBackend === 'function') loadCamerasFromBackend();
         }
-
-        // Desktops based on netInterval
-        if (tick % netInterval === 0) {
-            if (typeof refreshDesktopData === 'function') refreshDesktopData();
-        }
     }, 1000);
 }
+window.startAutoMonitor = startAutoMonitor;
 
 document.addEventListener('DOMContentLoaded', () => {
     setTimeout(startAutoMonitor, 2000);

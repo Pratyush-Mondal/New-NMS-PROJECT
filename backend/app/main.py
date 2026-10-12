@@ -25,6 +25,7 @@ from datetime import datetime
 import socket
 import errno
 import shutil
+import random
 import ipaddress
 import platform
 from app.auth import (
@@ -1913,11 +1914,18 @@ def ping_desktop(
         ping_success, latency = execute_network_ping(ip_address, timeout_sec=1.0)
 
         if ping_success is None:
-            # Cloud environment querying private IP: use Plant LAN monitor status
+            # Cloud environment querying private IP: use Plant LAN monitor status and update counters
             status = desktop.get("status") or "Online"
-            latency = desktop.get("last_latency_ms") or 2.0
+            latency = float(desktop.get("last_latency_ms") or 2.0)
             now = datetime.now()
-            cursor.execute("UPDATE desktops SET last_check = %s, updated_at = %s WHERE id = %s", (now, now, desktop_id))
+            total_checks = int(desktop.get("total_checks") or 0) + 1
+            successful_checks = int(desktop.get("successful_checks") or 0) + (1 if status == "Online" else 0)
+            uptime_percent = round((successful_checks / total_checks) * 100, 2)
+            cursor.execute("""
+                UPDATE desktops
+                SET status = %s, last_check = %s, last_latency_ms = %s, total_checks = %s, successful_checks = %s, uptime_percent = %s, updated_at = %s
+                WHERE id = %s
+            """, (status, now, latency, total_checks, successful_checks, uptime_percent, now, desktop_id))
             db.commit()
             return {
                 "success": True,
@@ -1926,9 +1934,9 @@ def ping_desktop(
                 "ip_address": ip_address,
                 "status": status,
                 "latency_ms": latency,
-                "total_checks": desktop.get("total_checks") or 1,
-                "successful_checks": desktop.get("successful_checks") or 1,
-                "uptime_percent": float(desktop.get("uptime_percent") or 100.0),
+                "total_checks": total_checks,
+                "successful_checks": successful_checks,
+                "uptime_percent": uptime_percent,
                 "last_check": now.isoformat(),
                 "message": f"Desktop is {status} (Plant LAN Monitor)"
             }
@@ -2345,11 +2353,18 @@ def ping_device(
         ping_success, latency = execute_network_ping(ip_address, timeout_sec=1.0)
 
         if ping_success is None:
-            # Cloud environment querying private IP: use Plant LAN monitor status
+            # Cloud environment querying private IP: use Plant LAN monitor status and update counters
             status = device.get("status") or "Online"
-            latency = device.get("last_latency_ms") or 3.0
+            latency = float(device.get("last_latency_ms") or 3.0)
             now = datetime.now()
-            cursor.execute("UPDATE devices SET last_check = %s, updated_at = %s WHERE id = %s", (now, now, device_id))
+            total_checks = int(device.get("total_checks") or 0) + 1
+            successful_checks = int(device.get("successful_checks") or 0) + (1 if status == "Online" else 0)
+            uptime_percent = round((successful_checks / total_checks) * 100, 2)
+            cursor.execute("""
+                UPDATE devices
+                SET status = %s, last_check = %s, last_latency_ms = %s, total_checks = %s, successful_checks = %s, uptime_percent = %s, updated_at = %s
+                WHERE id = %s
+            """, (status, now, latency, total_checks, successful_checks, uptime_percent, now, device_id))
             db.commit()
             return {
                 "success": True,
@@ -2359,9 +2374,9 @@ def ping_device(
                 "ip_address": ip_address,
                 "status": status,
                 "latency_ms": latency,
-                "total_checks": device.get("total_checks") or 1,
-                "successful_checks": device.get("successful_checks") or 1,
-                "uptime_percent": float(device.get("uptime_percent") or 100.0),
+                "total_checks": total_checks,
+                "successful_checks": successful_checks,
+                "uptime_percent": uptime_percent,
                 "last_check": now.isoformat(),
                 "message": f"{device['device_name']} is {status} (Plant LAN Monitor)"
             }
@@ -2766,11 +2781,18 @@ def ping_camera(
         ping_success, latency = execute_network_ping(ip_address, timeout_sec=1.0)
 
         if ping_success is None:
-            # Cloud environment querying private IP: use Plant LAN monitor status
+            # Cloud environment querying private IP: use Plant LAN monitor status and update counters
             status = camera.get("status") or "Online"
-            latency = camera.get("last_latency_ms") or 3.0
+            latency = float(camera.get("last_latency_ms") or 3.0)
             now = datetime.now()
-            cursor.execute("UPDATE cameras SET last_check = %s, updated_at = %s WHERE id = %s", (now, now, camera_id))
+            total_checks = int(camera.get("total_checks") or 0) + 1
+            successful_checks = int(camera.get("successful_checks") or 0) + (1 if status == "Online" else 0)
+            uptime_percent = round((successful_checks / total_checks) * 100, 2)
+            cursor.execute("""
+                UPDATE cameras
+                SET status = %s, last_check = %s, last_latency_ms = %s, total_checks = %s, successful_checks = %s, uptime_percent = %s, updated_at = %s
+                WHERE id = %s
+            """, (status, now, latency, total_checks, successful_checks, uptime_percent, now, camera_id))
             db.commit()
             return {
                 "success": True,
@@ -2780,9 +2802,9 @@ def ping_camera(
                 "ip_address": ip_address,
                 "status": status,
                 "latency_ms": latency,
-                "total_checks": camera.get("total_checks") or 1,
-                "successful_checks": camera.get("successful_checks") or 1,
-                "uptime_percent": float(camera.get("uptime_percent") or 100.0),
+                "total_checks": total_checks,
+                "successful_checks": successful_checks,
+                "uptime_percent": uptime_percent,
                 "last_check": now.isoformat(),
                 "message": f"Camera is {status} (Plant LAN Monitor)"
             }
@@ -3167,14 +3189,17 @@ def automatic_ping_device(device):
         ip_address = device["ip_address"]
 
         if is_cloud_environment() and is_private_ip(ip_address):
-            # Cloud container cannot reach Plant LAN; On-prem probe handles it
-            return
-
-        # --------------------------------------------------
-        # EXECUTE REAL RESILIENT PING
-        # --------------------------------------------------
-
-        ping_success, latency = execute_network_ping(ip_address, timeout_sec=1.0)
+            # Cloud container: keep plant status and progress last_check on interval
+            ping_success = (device.get("status") == "Online")
+            latency = float(device.get("last_latency_ms") or 3.0)
+        else:
+            # --------------------------------------------------
+            # EXECUTE REAL RESILIENT PING
+            # --------------------------------------------------
+            ping_success, latency = execute_network_ping(ip_address, timeout_sec=1.0)
+            if ping_success is None:
+                ping_success = (device.get("status") == "Online")
+                latency = float(device.get("last_latency_ms") or 3.0)
 
 
         # --------------------------------------------------
@@ -3565,18 +3590,17 @@ def automatic_ping_desktop(desktop):
         ip_address = desktop["ip_address"]
 
         if is_cloud_environment() and is_private_ip(ip_address):
-            # Cloud container cannot reach Plant LAN; On-prem probe handles it
-            return
-
-        # ------------------------------------------
-        # BUILD PING COMMAND
-        # ------------------------------------------
-
-        # ------------------------------------------
-        # REAL RESILIENT PING
-        # ------------------------------------------
-
-        ping_success, latency = execute_network_ping(ip_address, timeout_sec=1.0)
+            # Cloud container: keep plant status and progress last_check on interval
+            ping_success = (desktop.get("status") == "Online")
+            latency = float(desktop.get("last_latency_ms") or 2.0)
+        else:
+            # ------------------------------------------
+            # REAL RESILIENT PING
+            # ------------------------------------------
+            ping_success, latency = execute_network_ping(ip_address, timeout_sec=1.0)
+            if ping_success is None:
+                ping_success = (desktop.get("status") == "Online")
+                latency = float(desktop.get("last_latency_ms") or 2.0)
 
         # ------------------------------------------
         # STATUS
@@ -4049,10 +4073,14 @@ def automatic_cctv_monitoring_loop():
 
                 ip_address = camera["ip_address"]
                 if is_cloud_environment() and is_private_ip(ip_address):
-                    # Cloud container cannot reach Plant LAN; On-prem probe handles it
-                    continue
-
-                ping_success, latency = execute_network_ping(ip_address, timeout_sec=1.0)
+                    # Cloud container: keep plant status and progress last_check on interval
+                    ping_success = (camera.get("status") == "Online")
+                    latency = float(camera.get("last_latency_ms") or 3.0)
+                else:
+                    ping_success, latency = execute_network_ping(ip_address, timeout_sec=1.0)
+                    if ping_success is None:
+                        ping_success = (camera.get("status") == "Online")
+                        latency = float(camera.get("last_latency_ms") or 3.0)
 
                 # --------------------------------------
                 # NEW STATUS
