@@ -109,56 +109,15 @@ function updateDashboardGreeting() {
     el.textContent = `${timeGreeting}, ${adminName}.`;
 }
 
-async function refreshAll() {
+function refreshAll() {
     const btn = document.getElementById('dashboardRefreshBtn') || document.querySelector('button[onclick="refreshAll()"]');
-    const originalText = btn ? btn.innerHTML : '↻ Refresh Data';
     if (btn) {
         btn.disabled = true;
         btn.innerHTML = '<span style="display:inline-block;animation:spin 0.8s linear infinite;">⟳</span> Refreshing...';
     }
-    try {
-        const promises = [];
-        // 1. Dashboard live stats, alerts count & breakdown health list
-        if (typeof loadDashboardStats === 'function') promises.push(loadDashboardStats());
-        // 2. Devices Inventory from Backend
-        if (typeof loadDevicesFromBackend === 'function') promises.push(loadDevicesFromBackend());
-        // 3. CCTV Cameras Wall & Inventory from Backend
-        if (typeof loadCamerasFromBackend === 'function') promises.push(loadCamerasFromBackend());
-        // 4. Desktop Workstations from Backend
-        if (typeof refreshDesktopData === 'function') promises.push(refreshDesktopData());
-        // 5. Network Traffic Chart
-        if (typeof drawChart === 'function') promises.push(Promise.resolve(drawChart()));
-        // 6. Network Map Topology
-        if (typeof loadNetworkMap === 'function') promises.push(loadNetworkMap());
-        // 7. Incidents & Alerts page
-        if (typeof loadAlerts === 'function') promises.push(loadAlerts());
-        // 8. Admin Panel (if open)
-        if (typeof loadAdminPanelData === 'function' && document.getElementById('admin-panel')?.classList.contains('active')) {
-            promises.push(loadAdminPanelData());
-        }
-        // 9. Admin Profile Data
-        if (typeof loadAdminProfileData === 'function') {
-            promises.push(loadAdminProfileData());
-        }
-
-        if (promises.length > 0) {
-            await Promise.allSettled(promises);
-        }
-
-        if (typeof updateDashboardGreeting === 'function') {
-            updateDashboardGreeting();
-        }
-
-        showToast('✅ All infrastructure data refreshed');
-    } catch (err) {
-        console.error('Error during refreshAll:', err);
-        showToast('⚠️ Data refreshed');
-    } finally {
-        if (btn) {
-            btn.disabled = false;
-            btn.innerHTML = originalText;
-        }
-    }
+    setTimeout(() => {
+        window.location.reload();
+    }, 120);
 }
 
 window.refreshAll = refreshAll;
