@@ -48,6 +48,9 @@
         localStorage.setItem("admin_phone", data.admin.phone || "");
         localStorage.setItem("admin_department", data.admin.department || "");
         localStorage.setItem("admin_location", data.admin.location || "");
+        if (data.admin.profile_image) {
+            localStorage.setItem("admin_profile_image", data.admin.profile_image);
+        }
 
         console.log("NMS Authentication verified.");
 
@@ -2104,7 +2107,7 @@
 })();
 </script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script src="config.js"></script><script src="script_v2.js?v=5"></script>
+<script src="config.js"></script><script src="script_v2.js?v=6"></script>
 
 <script type="text/javascript">
 function googleTranslateElementInit() {

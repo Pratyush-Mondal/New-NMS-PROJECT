@@ -21,7 +21,7 @@ class UnifiedNMSHandler(http.server.SimpleHTTPRequestHandler):
         super().end_headers()
 
     def do_OPTIONS(self):
-        if self.path.startswith("/api/") or self.path in ("/docs", "/openapi.json"):
+        if self.path.startswith("/api/") or self.path.startswith("/uploads/") or self.path in ("/docs", "/openapi.json"):
             self.send_response(200)
             self.send_header("Access-Control-Allow-Origin", "*")
             self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, PATCH, OPTIONS")
@@ -61,7 +61,7 @@ class UnifiedNMSHandler(http.server.SimpleHTTPRequestHandler):
             self.send_error(501, "Unsupported method")
 
     def _is_backend_route(self):
-        return self.path.startswith("/api/") or self.path in ("/docs", "/openapi.json")
+        return self.path.startswith("/api/") or self.path.startswith("/uploads/") or self.path in ("/docs", "/openapi.json")
 
     def _proxy(self, method):
         target = f"{BACKEND_URL}{self.path}"

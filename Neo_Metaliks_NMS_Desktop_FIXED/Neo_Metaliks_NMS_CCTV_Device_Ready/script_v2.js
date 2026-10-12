@@ -762,14 +762,19 @@ function updateAdminProfileUI(name, email, phone, department, location) {
     setText('displayLocation', location || 'Neo Metaliks');
 
     const letter = (name || 'A').charAt(0).toUpperCase();
-    ['profileAvatarLarge', 'editProfileAvatar'].forEach(id => {
-        const el = document.getElementById(id);
-        if (el && !el.querySelector('img')) el.textContent = letter;
-    });
+    const currentImg = localStorage.getItem("admin_profile_image");
+    if (currentImg && typeof setProfileImage === 'function') {
+        setProfileImage(API_BASE_URL + currentImg);
+    } else {
+        ['profileAvatarLarge', 'editProfileAvatar'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el && !el.querySelector('img')) el.textContent = letter;
+        });
 
-    document.querySelectorAll('.admin-avatar, .admin-large-avatar').forEach(avatar => {
-        if (!avatar.querySelector('img')) avatar.textContent = letter;
-    });
+        document.querySelectorAll('.admin-avatar, .admin-large-avatar').forEach(avatar => {
+            if (!avatar.querySelector('img')) avatar.textContent = letter;
+        });
+    }
     document.querySelectorAll('.admin-info strong, .admin-menu-header strong').forEach(el => {
         el.textContent = name;
     });
@@ -832,12 +837,13 @@ async function loadAdminProfileData() {
             location
         );
         const savedProfileImage =
+            admin.profile_image ||
             localStorage.getItem(
                 "admin_profile_image"
             );
 
         if (savedProfileImage) {
-
+            localStorage.setItem("admin_profile_image", savedProfileImage);
             setProfileImage(
                 API_BASE_URL +
                 savedProfileImage
@@ -1093,64 +1099,46 @@ const API_BASE_URL = window.APP_CONFIG.API_BASE_URL;
 
 
 function setProfileImage(imageUrl) {
+    if (!imageUrl) return;
+    const adminName = localStorage.getItem("admin_name") || "Administrator";
+    const letter = (adminName || 'A').charAt(0).toUpperCase();
+    const cleanUrl = imageUrl.includes('?') ? imageUrl : `${imageUrl}?_t=${Date.now()}`;
 
-    if (!imageUrl) {
-        return;
-    }
-
-    const elementsToUpdate = [];
-    
-    // Header Avatar
-    const headerAvatar = document.querySelector("#adminButton .admin-avatar");
-    if (headerAvatar) elementsToUpdate.push(headerAvatar);
-    
-    // Profile Page Avatars
-    const largeAvatar = document.getElementById("profileAvatarLarge");
-    if (largeAvatar) elementsToUpdate.push(largeAvatar);
-    
-    const editAvatar = document.getElementById("editProfileAvatar");
-    if (editAvatar) elementsToUpdate.push(editAvatar);
-
-    elementsToUpdate.forEach(function (element) {
-
-        if (!element) {
-            return;
-        }
-
+    const updateEl = function (element) {
+        if (!element) return;
         element.innerHTML = `
             <img
-                src="${imageUrl}"
-                alt="Admin profile"
+                src="${cleanUrl}"
+                alt=""
+                onerror="this.onerror=null; this.parentElement.textContent='${letter}';"
                 style="
-                    width:100%;
-                    height:100%;
-                    object-fit:cover;
-                    border-radius:50%;
+                    width: 100%;
+                    height: 100%;
+                    object-fit: cover;
+                    border-radius: 50%;
+                    display: block;
                 "
             >
         `;
-    });
+    };
 
-    // Top administrator avatar-ও update
-    document
-        .querySelectorAll(
-            ".admin-avatar, .admin-large-avatar"
-        )
-        .forEach(function (avatar) {
+    const headerAvatar = document.querySelector("#adminButton .admin-avatar");
+    if (headerAvatar) updateEl(headerAvatar);
 
-            avatar.innerHTML = `
-                <img
-                    src="${imageUrl}"
-                    alt="Admin"
-                    style="
-                        width:100%;
-                        height:100%;
-                        object-fit:cover;
-                        border-radius:50%;
-                    "
-                >
-            `;
-        });
+    const largeAvatar = document.getElementById("profileAvatarLarge");
+    if (largeAvatar) updateEl(largeAvatar);
+
+    const editAvatar = document.getElementById("editProfileAvatar");
+    if (editAvatar) updateEl(editAvatar);
+
+    document.querySelectorAll(".admin-avatar, .admin-large-avatar").forEach(updateEl);
+}
+
+const initialStoredPhoto = localStorage.getItem("admin_profile_image");
+if (initialStoredPhoto) {
+    setTimeout(() => {
+        setProfileImage(API_BASE_URL + initialStoredPhoto);
+    }, 50);
 }
 
 
