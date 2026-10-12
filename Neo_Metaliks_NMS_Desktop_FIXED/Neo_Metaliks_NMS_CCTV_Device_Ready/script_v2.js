@@ -1,4 +1,11 @@
 /* =====================================================
+   NMS API BASE URL & GLOBAL CONFIG
+===================================================== */
+var NMS_API_BASE = (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL !== undefined)
+    ? window.APP_CONFIG.API_BASE_URL
+    : "";
+
+/* =====================================================
    NMS PAGE NAVIGATION - SINGLE SOURCE OF TRUTH
 ===================================================== */
 const pageHeadings = {
@@ -90,27 +97,55 @@ setInterval(clock, 1000); clock();
 function toast(msg) { const t = document.getElementById('toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(window.tt); window.tt = setTimeout(() => t.classList.remove('show'), 2300) }
 function showToast(msg) { toast(msg); }
 
+function updateDashboardGreeting() {
+    const el = document.getElementById("dashboardGreeting") || document.querySelector("#dashboard .hero h2");
+    if (!el) return;
+    const hour = new Date().getHours();
+    const timeGreeting = hour < 12 ? "Good morning" : (hour < 17 ? "Good afternoon" : "Good evening");
+    const adminName = localStorage.getItem("admin_name") || "Administrator";
+    el.textContent = `${timeGreeting}, ${adminName}.`;
+}
+
 async function refreshAll() {
-    const btn = document.querySelector('button[onclick="refreshAll()"]');
+    const btn = document.getElementById('dashboardRefreshBtn') || document.querySelector('button[onclick="refreshAll()"]');
     const originalText = btn ? btn.innerHTML : '↻ Refresh Data';
     if (btn) {
         btn.disabled = true;
-        btn.innerHTML = '⟳ Refreshing...';
+        btn.innerHTML = '<span style="display:inline-block;animation:spin 0.8s linear infinite;">⟳</span> Refreshing...';
     }
     try {
         const promises = [];
-        if (typeof fetchBackendDevices === 'function') promises.push(fetchBackendDevices());
-        if (typeof fetchBackendCameras === 'function') promises.push(fetchBackendCameras());
+        // 1. Dashboard live stats, alerts count & breakdown health list
+        if (typeof loadDashboardStats === 'function') promises.push(loadDashboardStats());
+        // 2. Devices Inventory from Backend
+        if (typeof loadDevicesFromBackend === 'function') promises.push(loadDevicesFromBackend());
+        // 3. CCTV Cameras Wall & Inventory from Backend
+        if (typeof loadCamerasFromBackend === 'function') promises.push(loadCamerasFromBackend());
+        // 4. Desktop Workstations from Backend
         if (typeof refreshDesktopData === 'function') promises.push(refreshDesktopData());
-        if (typeof updateDashboardStats === 'function') promises.push(updateDashboardStats());
-        if (typeof drawChart === 'function') promises.push(drawChart());
+        // 5. Network Traffic Chart
+        if (typeof drawChart === 'function') promises.push(Promise.resolve(drawChart()));
+        // 6. Network Map Topology
         if (typeof loadNetworkMap === 'function') promises.push(loadNetworkMap());
+        // 7. Incidents & Alerts page
+        if (typeof loadAlerts === 'function') promises.push(loadAlerts());
+        // 8. Admin Panel (if open)
         if (typeof loadAdminPanelData === 'function' && document.getElementById('admin-panel')?.classList.contains('active')) {
             promises.push(loadAdminPanelData());
         }
+        // 9. Admin Profile Data
+        if (typeof loadAdminProfileData === 'function') {
+            promises.push(loadAdminProfileData());
+        }
+
         if (promises.length > 0) {
             await Promise.allSettled(promises);
         }
+
+        if (typeof updateDashboardGreeting === 'function') {
+            updateDashboardGreeting();
+        }
+
         showToast('✅ All infrastructure data refreshed');
     } catch (err) {
         console.error('Error during refreshAll:', err);
@@ -122,6 +157,12 @@ async function refreshAll() {
         }
     }
 }
+
+window.refreshAll = refreshAll;
+window.updateDashboardStats = loadDashboardStats;
+window.fetchBackendDevices = loadDevicesFromBackend;
+window.fetchBackendCameras = loadCamerasFromBackend;
+window.updateDashboardGreeting = updateDashboardGreeting;
 function ackAlerts() { document.getElementById('dashAlerts').textContent = '0'; toast('All alerts acknowledged') }
 async function pingTest() {
     const btn = document.querySelector('button[onclick="pingTest()"]');
@@ -5374,7 +5415,7 @@ document.addEventListener("DOMContentLoaded", function () {
 // One source of truth for Add / Ping / Delete.
 // ==========================================================
 
-const NMS_API_BASE = window.APP_CONFIG.API_BASE_URL;
+NMS_API_BASE = (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL !== undefined) ? window.APP_CONFIG.API_BASE_URL : "";
 const deviceMonitoringTimers = new Map();
 
 function getAuthToken() {
@@ -6755,17 +6796,35 @@ async function loadDashboardStats() {
                 }
                 window.lastKnownAlertCount = data.active_alerts;
 
-                const elTotal = document.getElementById('dashTotal');
-                const elOnline = document.getElementById('dashOnline');
-                const elAlerts = document.getElementById('dashAlerts');
-
-                if (elTotal) elTotal.textContent = data.total_devices;
-                if (elOnline) elOnline.textContent = data.online_devices;
-                if (elAlerts) elAlerts.textContent = data.active_alerts;
+                if (elTotal) {
+                    elTotal.textContent = data.total_devices;
+                    const elTotalSub = elTotal.parentElement?.querySelector('span');
+                    if (elTotalSub) {
+                        const offlineCount = (data.total_devices - data.online_devices);
+                        elTotalSub.textContent = offlineCount > 0 ? `▲ ${offlineCount} offline today` : `▲ All devices online`;
+                    }
+                }
+                if (elOnline) {
+                    elOnline.textContent = data.online_devices;
+                    const elOnlineSub = elOnline.parentElement?.querySelector('span');
+                    if (elOnlineSub) {
+                        const availability = data.total_devices > 0 ? ((data.online_devices / data.total_devices) * 100).toFixed(1) : 100;
+                        elOnlineSub.textContent = `${availability}% availability`;
+                    }
+                }
+                if (elAlerts) {
+                    elAlerts.textContent = data.active_alerts;
+                    const elAlertsSub = elAlerts.parentElement?.querySelector('span');
+                    if (elAlertsSub) {
+                        elAlertsSub.textContent = data.active_alerts > 0 ? `${data.active_alerts} needs attention` : 'All systems normal';
+                        elAlertsSub.className = data.active_alerts > 0 ? 'negative' : 'positive';
+                    }
+                }
                 const sbAlerts = document.getElementById('sidebarAlertsCount');
                 const hrAlerts = document.getElementById('headerAlertsCount');
                 if (sbAlerts) sbAlerts.textContent = data.active_alerts;
                 if (hrAlerts) hrAlerts.textContent = data.active_alerts;
+                if (typeof updateDashboardGreeting === 'function') updateDashboardGreeting();
                 
                 const elHealth = document.getElementById('dashHealthList');
                 if (elHealth && data.breakdown) {
