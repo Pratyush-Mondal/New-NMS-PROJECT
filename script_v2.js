@@ -184,18 +184,39 @@ async function pingTest() {
     
     if (typeof toast === 'function') toast('Running ping test on all devices...');
     
+    const pingPromises = [];
+    
     if (typeof backendDevices !== 'undefined' && Array.isArray(backendDevices)) {
-        const pingPromises = backendDevices.map(d => {
+        backendDevices.forEach(d => {
             if (typeof pingDeviceFromFrontend === 'function') {
-                return pingDeviceFromFrontend(d.id, { silent: true }).catch(e => null);
+                pingPromises.push(pingDeviceFromFrontend(d.id, { silent: true }).catch(e => null));
             }
-            return Promise.resolve();
         });
-        await Promise.allSettled(pingPromises);
     }
+
+    if (typeof backendCameras !== 'undefined' && Array.isArray(backendCameras)) {
+        backendCameras.forEach(c => {
+            if (typeof pingCameraFromFrontend === 'function') {
+                pingPromises.push(pingCameraFromFrontend(c.id, { silent: true }).catch(e => null));
+            }
+        });
+    }
+
+    if (typeof desktopData !== 'undefined' && Array.isArray(desktopData)) {
+        desktopData.forEach(d => {
+            if (typeof pingDesktopFromFrontend === 'function') {
+                pingPromises.push(pingDesktopFromFrontend(d.backendId || d.id, { silent: true }).catch(e => null));
+            }
+        });
+    }
+    
+    await Promise.allSettled(pingPromises);
     
     if (typeof loadNetworkMap === 'function') {
         await loadNetworkMap();
+    }
+    if (typeof loadDashboardStats === 'function') {
+        await loadDashboardStats();
     }
     
     if (btn) {
@@ -2655,6 +2676,14 @@ function renderDesktopRows(list = desktopData) {
 
         <button
             type="button"
+            class="device-ping-btn"
+            onclick="pingDesktopFromFrontend(${Number(d.backendId || d.id)})"
+        >
+            PING
+        </button>
+
+        <button
+            type="button"
             class="table-action"
             onclick="viewDesktop('${String(d.id).replace(/'/g, "\\'")}')"
         >
@@ -2678,6 +2707,61 @@ function renderDesktopRows(list = desktopData) {
     `).join('');
     refreshDesktopSummary();
 }
+
+async function pingDesktopFromFrontend(desktopId, options = {}) {
+    const token = getAuthToken();
+    if (!token) {
+        if (!options.silent) toast("Login required");
+        return null;
+    }
+
+    if (!options.silent) toast("Pinging desktop...");
+
+    try {
+        const response = await fetch(
+            `${NMS_API_BASE}/api/desktops/${desktopId}/ping`,
+            {
+                method: "POST",
+                headers: {
+                    "Authorization": `Bearer ${token}`
+                }
+            }
+        );
+
+        const data = await response.json();
+
+        if (!response.ok || !data?.success) {
+            throw new Error(data?.detail || data?.message || "Desktop ping failed");
+        }
+
+        const index = desktopData.findIndex(
+            d => Number(d.backendId || d.id) === Number(desktopId)
+        );
+
+        if (index >= 0) {
+            desktopData[index].status = data.status;
+            desktopData[index].last_latency_ms = data.latency_ms;
+            desktopData[index].last_check = data.last_check;
+            renderDesktopRows(desktopData);
+        }
+
+        if (!options.silent) {
+            const latencyText =
+                data.latency_ms !== null && data.latency_ms !== undefined
+                    ? ` • ${data.latency_ms} ms`
+                    : "";
+            toast(`${data.desktop_code} → ${data.status}${latencyText}`);
+        }
+
+        return data;
+
+    } catch (error) {
+        console.error("Desktop Ping Error:", error);
+        if (!options.silent) toast("Ping: " + (error.message || "Failed"));
+        return null;
+    }
+}
+window.pingDesktopFromFrontend = pingDesktopFromFrontend;
 
 // ==========================================================
 // DESKTOP DELETE - BACKEND
@@ -4043,7 +4127,7 @@ async function pingCameraFromFrontend(cameraId, options = {}) {
             error
         );
 
-        if (!options.silent) alert(error.message || "CCTV ping failed.");
+        if (!options.silent) toast("CCTV Ping: " + (error.message || "Host offline or unreachable"));
     }
 }
 
@@ -7131,8 +7215,13 @@ function startAutoMonitor() {
         
         // Cameras based on cameraMonitoring and cameraInterval
         let camEnabled = s.cameraMonitoring !== false;
-        if (camEnabled && tick % camInterval === 0 && pageName === 'cctv') {
+        if (camEnabled && tick % camInterval === 0 && (pageName === 'cameras' || pageName === 'cctv')) {
             if (typeof loadCamerasFromBackend === 'function') loadCamerasFromBackend();
+        }
+
+        // Desktops based on interval
+        if (tick % 10 === 0 && pageName === 'desktops') {
+            if (typeof refreshDesktopData === 'function') refreshDesktopData();
         }
     }, 1000);
 }

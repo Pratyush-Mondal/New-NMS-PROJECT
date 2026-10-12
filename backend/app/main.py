@@ -22,12 +22,69 @@ import ipaddress
 import threading
 import time
 from datetime import datetime
+import socket
+import errno
+import shutil
 from app.auth import (
     authenticate_admin,
     create_access_token,
     get_admin_from_token
 )
 from app.database import get_db_connection
+
+
+def execute_network_ping(ip_address: str, timeout_sec: float = 1.0) -> tuple[bool, float | None]:
+    """
+    Resilient ping check:
+    1. Try system ping binary if available.
+    2. Fallback to TCP socket connection probes on common service ports.
+    Never throws unhandled exceptions; returns (is_online, latency_ms).
+    """
+    if not ip_address or not str(ip_address).strip():
+        return False, None
+    
+    ip_str = str(ip_address).strip()
+    
+    # 1. Try system ping if binary exists
+    ping_bin = shutil.which("ping")
+    if ping_bin:
+        try:
+            if platform.system().lower() == "windows":
+                cmd = [ping_bin, "-n", "1", "-w", str(int(timeout_sec * 1000)), ip_str]
+            else:
+                cmd = [ping_bin, "-c", "1", "-W", str(max(1, int(timeout_sec))), ip_str]
+            
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_sec + 1.0)
+            if res.returncode == 0:
+                out = res.stdout + res.stderr
+                match = re.search(r"time[=<]\s*(\d+(?:\.\d+)?)\s*ms", out, re.IGNORECASE)
+                lat = float(match.group(1)) if match else 1.0
+                return True, lat
+        except Exception:
+            pass
+            
+    # 2. Socket-based connectivity probe (fallback for cloud/containers without ping binary or raw ICMP)
+    probe_ports = [80, 443, 554, 8000, 37777, 445, 135, 3389, 22]
+    sock_timeout = min(timeout_sec, 0.4)
+    
+    for port in probe_ports:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(sock_timeout)
+        t_start = time.perf_counter()
+        try:
+            ret = s.connect_ex((ip_str, port))
+            t_elapsed = (time.perf_counter() - t_start) * 1000
+            if ret == 0 or ret in (getattr(errno, 'ECONNREFUSED', 111), 111, 10061):
+                return True, round(max(0.5, t_elapsed), 2)
+        except Exception:
+            pass
+        finally:
+            try:
+                s.close()
+            except Exception:
+                pass
+                
+    return False, None
 
 
 app = FastAPI(
@@ -1771,6 +1828,113 @@ def update_desktop(
         db.close()
 
 
+# ==========================================
+# DESKTOP PING API
+# ==========================================
+
+@app.post("/api/desktops/{desktop_id}/ping")
+def ping_desktop(
+    desktop_id: int,
+    admin=Depends(get_current_admin)
+):
+    db = get_db_connection()
+    cursor = None
+
+    try:
+        cursor = db.cursor(dictionary=True)
+
+        cursor.execute(
+            """
+            SELECT
+                id,
+                desktop_code,
+                department,
+                location,
+                ip_address,
+                total_checks,
+                successful_checks,
+                uptime_percent
+            FROM desktops
+            WHERE id = %s
+            LIMIT 1
+            """,
+            (desktop_id,)
+        )
+
+        desktop = cursor.fetchone()
+
+        if not desktop:
+            raise HTTPException(
+                status_code=404,
+                detail="Desktop not found."
+            )
+
+        ip_address = desktop.get("ip_address")
+        ping_success, latency = execute_network_ping(ip_address, timeout_sec=1.0)
+
+        status = "Online" if ping_success else "Offline"
+        now = datetime.now()
+
+        total_checks = int(desktop.get("total_checks") or 0) + 1
+        successful_checks = int(desktop.get("successful_checks") or 0) + (1 if ping_success else 0)
+        uptime_percent = round((successful_checks / total_checks) * 100, 2)
+
+        cursor.execute(
+            """
+            UPDATE desktops
+            SET
+                status = %s,
+                last_check = %s,
+                last_latency_ms = %s,
+                total_checks = %s,
+                successful_checks = %s,
+                uptime_percent = %s,
+                updated_at = %s
+            WHERE id = %s
+            """,
+            (
+                status,
+                now,
+                latency,
+                total_checks,
+                successful_checks,
+                uptime_percent,
+                now,
+                desktop_id
+            )
+        )
+        db.commit()
+
+        return {
+            "success": True,
+            "desktop_id": desktop["id"],
+            "desktop_code": desktop["desktop_code"],
+            "ip_address": ip_address,
+            "status": status,
+            "latency_ms": latency,
+            "total_checks": total_checks,
+            "successful_checks": successful_checks,
+            "uptime_percent": uptime_percent,
+            "last_check": now.isoformat(),
+            "message": "Desktop ping successful" if ping_success else "Desktop offline or unreachable"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as error:
+        if db:
+            db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=str(error)
+        )
+    finally:
+        if cursor:
+            cursor.close()
+        if db:
+            db.close()
+
+
 
     # ==========================================
 # DEVICES - CREATE DEVICE
@@ -2114,112 +2278,15 @@ def ping_device(
 
         ip_address = device["ip_address"]
 
-        # ------------------------------------------
-        # PING COMMAND
-        # ------------------------------------------
+        # EXECUTE RESILIENT PING
+        ping_success, latency = execute_network_ping(ip_address, timeout_sec=1.0)
 
-        if platform.system().lower() == "windows":
-
-            command = [
-                "ping",
-                "-n",
-                "1",
-                "-w",
-                "1000",
-                ip_address
-            ]
-
-        else:
-
-            command = [
-                "ping",
-                "-c",
-                "1",
-                "-W",
-                "1",
-                ip_address
-            ]
-
-        # ------------------------------------------
-        # EXECUTE PING
-        # ------------------------------------------
-
-        result = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            timeout=1
-        )
-
-        output = result.stdout + result.stderr
-
-        ping_success = (
-            result.returncode == 0
-        )
-
-        # ------------------------------------------
-        # GET LATENCY
-        # ------------------------------------------
-
-        latency = None
-
-        match = re.search(
-            r"time[=<]\s*(\d+(?:\.\d+)?)\s*ms",
-            output,
-            re.IGNORECASE
-        )
-
-        if match:
-            latency = float(match.group(1))
-
-        # ------------------------------------------
-        # STATUS
-        # ------------------------------------------
-
-        status = (
-            "Online"
-            if ping_success
-            else "Offline"
-        )
-
+        status = "Online" if ping_success else "Offline"
         now = datetime.now()
 
-        # ------------------------------------------
-        # EXISTING COUNTERS
-        # ------------------------------------------
-
-        total_checks = int(
-            device["total_checks"] or 0
-        )
-
-        successful_checks = int(
-            device["successful_checks"] or 0
-        )
-
-        # Every ping = 1 check
-        total_checks += 1
-
-        # Successful ping = successful check
-        if ping_success:
-            successful_checks += 1
-
-        # ------------------------------------------
-        # CALCULATE UPTIME
-        # ------------------------------------------
-
-        uptime_percent = (
-            successful_checks /
-            total_checks
-        ) * 100
-
-        uptime_percent = round(
-            uptime_percent,
-            2
-        )
-
-        # ------------------------------------------
-        # UPDATE DATABASE
-        # ------------------------------------------
+        total_checks = int(device["total_checks"] or 0) + 1
+        successful_checks = int(device["successful_checks"] or 0) + (1 if ping_success else 0)
+        uptime_percent = round((successful_checks / total_checks) * 100, 2)
 
         cursor.execute(
             """
@@ -2248,10 +2315,6 @@ def ping_device(
 
         db.commit()
 
-        # ------------------------------------------
-        # SUCCESS RESPONSE
-        # ------------------------------------------
-
         return {
             "success": True,
             "device_id": device["id"],
@@ -2267,7 +2330,7 @@ def ping_device(
             "message": (
                 "Ping successful"
                 if ping_success
-                else "Ping failed"
+                else "Ping failed (Host offline or unreachable)"
             )
         }
 
@@ -2275,8 +2338,8 @@ def ping_device(
         raise
 
     except Exception as error:
-
-        db.rollback()
+        if db:
+            db.rollback()
 
         raise HTTPException(
             status_code=500,
@@ -2612,119 +2675,15 @@ def ping_camera(
 
         ip_address = camera["ip_address"]
 
-        # --------------------------------------
-        # WINDOWS / LINUX PING COMMAND
-        # --------------------------------------
+        # EXECUTE RESILIENT PING
+        ping_success, latency = execute_network_ping(ip_address, timeout_sec=1.0)
 
-        if platform.system().lower() == "windows":
-
-            command = [
-                "ping",
-                "-n",
-                "1",
-                "-w",
-                "1000",
-                ip_address
-            ]
-
-        else:
-
-            command = [
-                "ping",
-                "-c",
-                "1",
-                "-W",
-                "1",
-                ip_address
-            ]
-
-        # --------------------------------------
-        # EXECUTE PING
-        # --------------------------------------
-
-        result = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            timeout=1
-        )
-
-        output = (
-            result.stdout +
-            result.stderr
-        )
-
-        ping_success = (
-            result.returncode == 0
-        )
-
-        # --------------------------------------
-        # GET LATENCY
-        # --------------------------------------
-
-        latency = None
-
-        match = re.search(
-            r"time[=<]\s*(\d+(?:\.\d+)?)\s*ms",
-            output,
-            re.IGNORECASE
-        )
-
-        if match:
-
-            latency = float(
-                match.group(1)
-            )
-
-        # --------------------------------------
-        # STATUS
-        # --------------------------------------
-
-        status = (
-            "Online"
-            if ping_success
-            else "Offline"
-        )
-
+        status = "Online" if ping_success else "Offline"
         now = datetime.now()
 
-        # --------------------------------------
-        # EXISTING COUNTERS
-        # --------------------------------------
-
-        total_checks = int(
-            camera["total_checks"] or 0
-        )
-
-        successful_checks = int(
-            camera["successful_checks"] or 0
-        )
-
-        # Every ping = one check
-        total_checks += 1
-
-        # Successful ping
-        if ping_success:
-
-            successful_checks += 1
-
-        # --------------------------------------
-        # CALCULATE UPTIME
-        # --------------------------------------
-
-        uptime_percent = (
-            successful_checks /
-            total_checks
-        ) * 100
-
-        uptime_percent = round(
-            uptime_percent,
-            2
-        )
-
-        # --------------------------------------
-        # UPDATE CAMERA
-        # --------------------------------------
+        total_checks = int(camera["total_checks"] or 0) + 1
+        successful_checks = int(camera["successful_checks"] or 0) + (1 if ping_success else 0)
+        uptime_percent = round((successful_checks / total_checks) * 100, 2)
 
         cursor.execute(
             """
@@ -2753,19 +2712,6 @@ def ping_camera(
 
         db.commit()
 
-        # --------------------------------------
-        # RESPONSE
-        # --------------------------------------
-
-        print(
-            f"[NMS CCTV] "
-            f"{camera['camera_code']} | "
-            f"{ip_address} | "
-            f"{status} | "
-            f"Latency={latency if latency is not None else '-'} ms | "
-            f"Uptime={uptime_percent}%"
-        )
-
         return {
             "success": True,
             "camera_id": camera["id"],
@@ -2781,7 +2727,7 @@ def ping_camera(
             "message": (
                 "Camera ping successful"
                 if ping_success
-                else "Camera ping failed"
+                else "Camera ping failed (Host offline or unreachable)"
             )
         }
 
@@ -2789,8 +2735,8 @@ def ping_camera(
         raise
 
     except Exception as error:
-
-        db.rollback()
+        if db:
+            db.rollback()
 
         raise HTTPException(
             status_code=500,
@@ -3362,72 +3308,10 @@ def automatic_ping_device(device):
         ip_address = device["ip_address"]
 
         # --------------------------------------------------
-        # BUILD PING COMMAND
+        # EXECUTE REAL RESILIENT PING
         # --------------------------------------------------
 
-        if platform.system().lower() == "windows":
-
-            command = [
-                "ping",
-                "-n",
-                "1",
-                "-w",
-                "1000",
-                ip_address
-            ]
-
-        else:
-
-            command = [
-                "ping",
-                "-c",
-                "1",
-                "-W",
-                "1",
-                ip_address
-            ]
-
-
-        # --------------------------------------------------
-        # EXECUTE REAL PING
-        # --------------------------------------------------
-
-        result = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            timeout=3
-        )
-
-
-        output = (
-            result.stdout +
-            result.stderr
-        )
-
-
-        ping_success = (
-            result.returncode == 0
-        )
-
-
-        # --------------------------------------------------
-        # READ LATENCY
-        # --------------------------------------------------
-
-        latency = None
-
-        match = re.search(
-            r"time[=<]\s*(\d+(?:\.\d+)?)\s*ms",
-            output,
-            re.IGNORECASE
-        )
-
-        if match:
-
-            latency = float(
-                match.group(1)
-            )
+        ping_success, latency = execute_network_ping(ip_address, timeout_sec=1.0)
 
 
         # --------------------------------------------------
@@ -3821,65 +3705,11 @@ def automatic_ping_desktop(desktop):
         # BUILD PING COMMAND
         # ------------------------------------------
 
-        if platform.system().lower() == "windows":
-
-            command = [
-                "ping",
-                "-n",
-                "1",
-                "-w",
-                "1000",
-                ip_address
-            ]
-
-        else:
-
-            command = [
-                "ping",
-                "-c",
-                "1",
-                "-W",
-                "1",
-                ip_address
-            ]
-
         # ------------------------------------------
-        # REAL PING
+        # REAL RESILIENT PING
         # ------------------------------------------
 
-        result = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            timeout=3
-        )
-
-        output = (
-            result.stdout +
-            result.stderr
-        )
-
-        ping_success = (
-            result.returncode == 0
-        )
-
-        # ------------------------------------------
-        # LATENCY
-        # ------------------------------------------
-
-        latency = None
-
-        match = re.search(
-            r"time[=<]\s*(\d+(?:\.\d+)?)\s*ms",
-            output,
-            re.IGNORECASE
-        )
-
-        if match:
-
-            latency = float(
-                match.group(1)
-            )
+        ping_success, latency = execute_network_ping(ip_address, timeout_sec=1.0)
 
         # ------------------------------------------
         # STATUS
@@ -4334,68 +4164,11 @@ def automatic_cctv_monitoring_loop():
                     continue
 
                 # --------------------------------------
-                # PING CAMERA
+                # PING CAMERA (RESILIENT)
                 # --------------------------------------
 
                 ip_address = camera["ip_address"]
-
-                if platform.system().lower() == "windows":
-
-                    command = [
-                        "ping",
-                        "-n", "1",
-                        "-w", "1000",
-                        ip_address
-                    ]
-
-                else:
-
-                    command = [
-                        "ping",
-                        "-c", "1",
-                        "-W", "1",
-                        ip_address
-                    ]
-
-                ping_success = False
-                latency = None
-
-                try:
-
-                    result = subprocess.run(
-                        command,
-                        capture_output=True,
-                        text=True,
-                        timeout=3
-                    )
-
-                    output = (
-                        result.stdout +
-                        result.stderr
-                    )
-
-                    ping_success = (
-                        result.returncode == 0
-                    )
-
-                    match = re.search(
-                        r"time[=<]\s*(\d+(?:\.\d+)?)\s*ms",
-                        output,
-                        re.IGNORECASE
-                    )
-
-                    if match:
-                        latency = float(
-                            match.group(1)
-                        )
-
-                except Exception as ping_error:
-
-                    print(
-                        f"[ERROR] CCTV ping error | "
-                        f"{ip_address} | "
-                        f"{ping_error}"
-                    )
+                ping_success, latency = execute_network_ping(ip_address, timeout_sec=1.0)
 
                 # --------------------------------------
                 # NEW STATUS
