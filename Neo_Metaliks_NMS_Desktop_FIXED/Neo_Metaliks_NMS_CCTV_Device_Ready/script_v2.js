@@ -1,9 +1,23 @@
 /* =====================================================
    NMS API BASE URL & GLOBAL CONFIG
 ===================================================== */
-var NMS_API_BASE = (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL !== undefined)
-    ? window.APP_CONFIG.API_BASE_URL
-    : "";
+var NMS_API_BASE = (function() {
+    if (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL !== undefined && window.APP_CONFIG.API_BASE_URL !== null) {
+        return window.APP_CONFIG.API_BASE_URL;
+    }
+    if (window.location.protocol === "file:") return "http://127.0.0.1:8000";
+    if (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") {
+        return window.location.port === "8081" ? "" : "http://" + window.location.hostname + ":8000";
+    }
+    if (window.location.hostname.includes("onrender.com")) return "";
+    if (window.location.hostname.includes("vercel.app") || window.location.protocol === "https:") {
+        return "https://neo-metaliks-nms.onrender.com";
+    }
+    return "";
+})();
+
+window.APP_CONFIG = window.APP_CONFIG || {};
+window.APP_CONFIG.API_BASE_URL = NMS_API_BASE;
 
 /* =====================================================
    NMS PAGE NAVIGATION - SINGLE SOURCE OF TRUTH
@@ -7191,9 +7205,7 @@ async function loadAdminPanelData() {
         return;
     }
 
-    const apiBase = (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL !== undefined)
-        ? window.APP_CONFIG.API_BASE_URL
-        : (window.location.port === '8081' ? '' : 'http://' + window.location.hostname + ':8000');
+    const apiBase = NMS_API_BASE;
 
     const refreshBtn = document.getElementById('adminRefreshTelemetryBtn');
     if (refreshBtn) {
@@ -7516,9 +7528,7 @@ async function submitCreateAdmin(event) {
         return;
     }
 
-    const apiBase = (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL !== undefined)
-        ? window.APP_CONFIG.API_BASE_URL
-        : (window.location.port === '8081' ? '' : 'http://' + window.location.hostname + ':8000');
+    const apiBase = NMS_API_BASE;
 
     if (submitBtn) {
         submitBtn.disabled = true;
@@ -7569,9 +7579,7 @@ async function toggleAdminStatus(adminId, newStatus, adminName) {
         return;
     }
 
-    const apiBase = (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL !== undefined)
-        ? window.APP_CONFIG.API_BASE_URL
-        : (window.location.port === '8081' ? '' : 'http://' + window.location.hostname + ':8000');
+    const apiBase = NMS_API_BASE;
 
     try {
         const response = await fetch(`${apiBase}/api/admin/${adminId}/status`, {
@@ -7610,9 +7618,7 @@ async function deleteAdmin(adminId, adminName) {
         return;
     }
 
-    const apiBase = (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL !== undefined)
-        ? window.APP_CONFIG.API_BASE_URL
-        : (window.location.port === '8081' ? '' : 'http://' + window.location.hostname + ':8000');
+    const apiBase = NMS_API_BASE;
 
     try {
         const response = await fetch(`${apiBase}/api/admin/${adminId}`, {

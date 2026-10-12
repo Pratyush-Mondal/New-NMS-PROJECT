@@ -4680,11 +4680,16 @@ cctv_monitoring_stop_event = threading.Event()
 # ==========================================
 @app.get("/{full_path:path}", include_in_schema=False)
 def serve_frontend_files(full_path: str):
+    root_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
     if not full_path or full_path == "/":
         target = os.path.join(FRONTEND_DIR, "login.html")
+        if not os.path.isfile(target):
+            target = os.path.join(root_dir, "login.html")
     else:
         clean = full_path.lstrip("/")
         target = os.path.join(FRONTEND_DIR, clean)
+        if not os.path.isfile(target):
+            target = os.path.join(root_dir, clean)
 
     if os.path.isfile(target):
         headers = {}
@@ -4695,6 +4700,8 @@ def serve_frontend_files(full_path: str):
         return FileResponse(target, headers=headers)
 
     login_fallback = os.path.join(FRONTEND_DIR, "login.html")
+    if not os.path.isfile(login_fallback):
+        login_fallback = os.path.join(root_dir, "login.html")
     if os.path.isfile(login_fallback):
         return FileResponse(login_fallback)
 

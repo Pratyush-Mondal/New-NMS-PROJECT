@@ -7,6 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="config.js"></script>
     <style>
         :root {
             --bg-base: #060e17;
@@ -600,15 +601,32 @@
             loginBtn.classList.add("loading");
 
             // 3. Resolve API URL
-            const apiBase = (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL !== undefined)
-                ? window.APP_CONFIG.API_BASE_URL
-                : (window.location.protocol === "https:" || window.location.port === "8081" || !window.location.port ? "" : "http://" + window.location.hostname + ":8000");
+            function getNmsApiBase() {
+                if (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL !== undefined && window.APP_CONFIG.API_BASE_URL !== null) {
+                    return window.APP_CONFIG.API_BASE_URL;
+                }
+                if (window.location.protocol === "file:") {
+                    return "http://127.0.0.1:8000";
+                }
+                if (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") {
+                    return window.location.port === "8081" ? "" : "http://" + window.location.hostname + ":8000";
+                }
+                if (window.location.hostname.includes("onrender.com")) {
+                    return "";
+                }
+                if (window.location.hostname.includes("vercel.app") || window.location.protocol === "https:") {
+                    return "https://neo-metaliks-nms.onrender.com";
+                }
+                return "";
+            }
+
+            const apiBase = getNmsApiBase();
             const apiUrl = apiBase + "/api/auth/login";
 
             try {
                 // Timeout controller
                 const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 12000);
+                const timeoutId = setTimeout(() => controller.abort(), 15000);
 
                 const response = await fetch(apiUrl, {
                     method: "POST",
@@ -666,8 +684,8 @@
 
                 // Smooth redirect
                 setTimeout(() => {
-                    window.location.href = "index.html";
-                }, 400);
+                    window.location.href = "index.html#dashboard";
+                }, 300);
 
             } catch (err) {
                 // Differentiate Network Error from Authentication Error

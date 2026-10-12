@@ -16,11 +16,27 @@
         return;
     }
 
-    try {
-        const apiBase = (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL !== undefined)
-            ? window.APP_CONFIG.API_BASE_URL
-            : (window.location.port === "8081" ? "" : "http://" + window.location.hostname + ":8000");
+    function resolveApi() {
+        if (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL !== undefined && window.APP_CONFIG.API_BASE_URL !== null) {
+            return window.APP_CONFIG.API_BASE_URL;
+        }
+        if (window.location.protocol === "file:") {
+            return "http://127.0.0.1:8000";
+        }
+        if (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") {
+            return window.location.port === "8081" ? "" : "http://" + window.location.hostname + ":8000";
+        }
+        if (window.location.hostname.includes("onrender.com")) {
+            return "";
+        }
+        if (window.location.hostname.includes("vercel.app") || window.location.protocol === "https:") {
+            return "https://neo-metaliks-nms.onrender.com";
+        }
+        return "";
+    }
 
+    try {
+        const apiBase = resolveApi();
         const response = await fetch(
             apiBase + "/api/auth/me",
             {
@@ -31,38 +47,37 @@
             }
         );
 
+        if (response.status === 401 || response.status === 403) {
+            console.warn("Session expired or token invalid.");
+            localStorage.removeItem("access_token");
+            localStorage.removeItem("adminLoggedIn");
+            localStorage.removeItem("loggedIn");
+            window.location.href = "login.html";
+            return;
+        }
+
         if (!response.ok) {
-            throw new Error("Invalid or expired token");
+            console.warn("Backend auth verification warning (HTTP " + response.status + "). Retaining cached session.");
+            return;
         }
 
         const data = await response.json();
 
-        if (!data.success || !data.admin) {
-            throw new Error("Authentication failed");
+        if (data.success && data.admin) {
+            localStorage.setItem("admin_id", data.admin.id);
+            localStorage.setItem("admin_name", data.admin.name);
+            localStorage.setItem("admin_email", data.admin.email);
+            localStorage.setItem("admin_phone", data.admin.phone || "");
+            localStorage.setItem("admin_department", data.admin.department || "");
+            localStorage.setItem("admin_location", data.admin.location || "");
+            if (data.admin.profile_image) {
+                localStorage.setItem("admin_profile_image", data.admin.profile_image);
+            }
+            console.log("NMS Authentication verified.");
         }
-
-        // সর্বশেষ admin information update
-        localStorage.setItem("admin_id", data.admin.id);
-        localStorage.setItem("admin_name", data.admin.name);
-        localStorage.setItem("admin_email", data.admin.email);
-        localStorage.setItem("admin_phone", data.admin.phone || "");
-        localStorage.setItem("admin_department", data.admin.department || "");
-        localStorage.setItem("admin_location", data.admin.location || "");
-        if (data.admin.profile_image) {
-            localStorage.setItem("admin_profile_image", data.admin.profile_image);
-        }
-
-        console.log("NMS Authentication verified.");
 
     } catch (error) {
-
-        console.error("Authentication error:", error);
-
-        localStorage.removeItem("access_token");
-        localStorage.removeItem("adminLoggedIn");
-        localStorage.removeItem("loggedIn");
-
-        window.location.href = "login.html";
+        console.warn("Auth check network glitch:", error);
     }
 
 })();
@@ -2043,71 +2058,9 @@
 
 <div id="toast"></div>
 
-<script>
-(async function checkAuthentication() {
-
-    const token = localStorage.getItem("access_token");
-
-    // Token না থাকলে Login page-এ পাঠাবে
-    if (!token) {
-        window.location.replace("login.html");
-        return;
-    }
-
-    try {
-        const apiBase = (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL !== undefined)
-            ? window.APP_CONFIG.API_BASE_URL
-            : (window.location.port === "8081" ? "" : "http://" + window.location.hostname + ":8000");
-
-        const response = await fetch(
-            apiBase + "/api/auth/me",
-            {
-                method: "GET",
-                headers: {
-                    "Authorization": "Bearer " + token
-                }
-            }
-        );
-
-        // Token invalid / expired হলে
-        if (!response.ok) {
-            throw new Error("Authentication failed");
-        }
-
-        const data = await response.json();
-
-        // Backend থেকে valid admin না এলে
-        if (!data.success || !data.admin) {
-            throw new Error("Invalid authentication");
-        }
-
-        // সর্বশেষ admin information save
-        localStorage.setItem("admin_id", data.admin.id);
-        localStorage.setItem("admin_name", data.admin.name);
-        localStorage.setItem("admin_email", data.admin.email);
-        localStorage.setItem("admin_phone", data.admin.phone || "");
-        localStorage.setItem("admin_department", data.admin.department || "");
-        localStorage.setItem("admin_location", data.admin.location || "");
-
-        console.log("✅ NMS authentication verified.");
-
-    } catch (error) {
-
-        console.error("Authentication error:", error);
-
-        // পুরনো login information remove
-        localStorage.removeItem("access_token");
-        localStorage.removeItem("adminLoggedIn");
-        localStorage.removeItem("loggedIn");
-
-        // Login page-এ ফেরত পাঠাবে
-        window.location.replace("login.html");
-    }
-
-})();
-</script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script src="config.js"></script><script src="script_v2.js?v=6"></script>
+<script src="config.js"></script>
+<script src="script_v2.js?v=7"></script>
 
 <script type="text/javascript">
 function googleTranslateElementInit() {

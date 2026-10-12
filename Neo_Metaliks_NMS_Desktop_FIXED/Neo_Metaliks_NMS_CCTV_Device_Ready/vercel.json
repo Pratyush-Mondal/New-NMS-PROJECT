@@ -8,6 +8,10 @@
     {
       "source": "/uploads/:match*",
       "destination": "https://neo-metaliks-nms.onrender.com/uploads/:match*"
+    },
+    {
+      "source": "/",
+      "destination": "/login.html"
     }
   ]
 }

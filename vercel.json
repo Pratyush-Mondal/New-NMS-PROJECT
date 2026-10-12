@@ -2,20 +2,16 @@
   "cleanUrls": true,
   "rewrites": [
     {
+      "source": "/api/:match*",
+      "destination": "https://neo-metaliks-nms.onrender.com/api/:match*"
+    },
+    {
+      "source": "/uploads/:match*",
+      "destination": "https://neo-metaliks-nms.onrender.com/uploads/:match*"
+    },
+    {
       "source": "/",
-      "destination": "/Neo_Metaliks_NMS_Desktop_FIXED/Neo_Metaliks_NMS_CCTV_Device_Ready/login.html"
-    },
-    {
-      "source": "/login.html",
-      "destination": "/Neo_Metaliks_NMS_Desktop_FIXED/Neo_Metaliks_NMS_CCTV_Device_Ready/login.html"
-    },
-    {
-      "source": "/index.html",
-      "destination": "/Neo_Metaliks_NMS_Desktop_FIXED/Neo_Metaliks_NMS_CCTV_Device_Ready/index.html"
-    },
-    {
-      "source": "/:path((?!Neo_Metaliks_NMS_Desktop_FIXED).*\\..*)",
-      "destination": "/Neo_Metaliks_NMS_Desktop_FIXED/Neo_Metaliks_NMS_CCTV_Device_Ready/:path"
+      "destination": "/login.html"
     }
   ]
 }
