@@ -97,7 +97,7 @@ def generate_report_data(conn, from_date_str: str = None, to_date_str: str = Non
 
         # Also fetch any logs if present
         cursor.execute("""
-            SELECT id, event_type, source_type, source_name, description, created_at
+            SELECT id, event_type, source_name, description, created_at
             FROM logs
             ORDER BY created_at ASC
         """)
@@ -144,7 +144,7 @@ def generate_report_data(conn, from_date_str: str = None, to_date_str: str = Non
 
         if status and log.get("source_name") in events_by_code:
             events_by_code[log["source_name"]].append({
-                "source_type": log["source_type"],
+                "source_type": log.get("event_type", "System"),
                 "source_name": log["source_name"],
                 "status": status,
                 "timestamp": log["created_at"],
@@ -451,7 +451,7 @@ def create_excel_report(report_data: dict) -> bytes:
     ws_sum = wb.create_sheet(title="Summary")
     ws_sum.views.sheetView[0].showGridLines = True
 
-    ws_sum.cell(row=1, column=1, value="NEO METALIKS NMS — NETWORK MONITORING REPORT").font = font_title
+    ws_sum.cell(row=1, column=1, value="NEO METALIKS NMS - NETWORK MONITORING REPORT").font = font_title
     ws_sum.cell(row=2, column=1, value=f"Selected Period: {period['from_date']} to {period['to_date']} | Generated At: {period['generated_at']}").font = font_regular
 
     headers_sum = ["Metric Name", "Value", "Unit / Description", "Category"]
@@ -493,7 +493,7 @@ def create_excel_report(report_data: dict) -> bytes:
     # Helper for asset sheets
     def build_asset_sheet(ws, title, asset_list, asset_type_label="Device"):
         ws.views.sheetView[0].showGridLines = True
-        ws.cell(row=1, column=1, value=f"NEO METALIKS NMS — {title.upper()}").font = font_title
+        ws.cell(row=1, column=1, value=f"NEO METALIKS NMS - {title.upper()}").font = font_title
         ws.cell(row=2, column=1, value=f"From: {period['from_date']} To: {period['to_date']} | Generated: {period['generated_at']}").font = font_regular
 
         headers = [
@@ -562,7 +562,7 @@ def create_excel_report(report_data: dict) -> bytes:
     # ==========================================
     ws_hist = wb.create_sheet(title="Status History")
     ws_hist.views.sheetView[0].showGridLines = True
-    ws_hist.cell(row=1, column=1, value="NEO METALIKS NMS — STATUS HISTORY & TRANSITION EVENTS").font = font_title
+    ws_hist.cell(row=1, column=1, value="NEO METALIKS NMS - STATUS HISTORY & TRANSITION EVENTS").font = font_title
     ws_hist.cell(row=2, column=1, value=f"Period: {period['from_date']} to {period['to_date']} | Total Events Recorded: {len(report_data['status_history'])}").font = font_regular
 
     headers_hist = [
