@@ -27,7 +27,26 @@ def check_port_in_use(port=8000):
         s.settimeout(0.5)
         return s.connect_ex(("127.0.0.1", port)) == 0
 
+def ensure_env_file():
+    env_file = os.path.join(PROJECT_DIR, "backend", ".env")
+    if not os.path.exists(env_file):
+        default_content = (
+            "DATABASE_URL=mysql://2v9Ac8dmNnbuaJg.root:3K1EV2DPGMMw6yEb@gateway01.ap-southeast-1.prod.aws.tidbcloud.com:4000/test\n"
+            "MYSQL_HOST=127.0.0.1\n"
+            "MYSQL_PORT=3307\n"
+            "MYSQL_USER=root\n"
+            "MYSQL_PASSWORD=\n"
+            "MYSQL_DATABASE=neo_metaliks_nms\n"
+            "JWT_SECRET=zP2CxWJeZngbA4tVz8OcU_t6wDXWZFHTEX_uGj56q_CzFwEJO8E-Xvds3xpJYQkI\n"
+        )
+        try:
+            with open(env_file, "w", encoding="utf-8") as f:
+                f.write(default_content)
+        except Exception:
+            pass
+
 def main():
+    ensure_env_file()
     if not acquire_instance_lock() or check_port_in_use(8000):
         with open(LOG_FILE, "a", encoding="utf-8") as f:
             f.write(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [INFO] Instance already active or port 8000 in use. Exiting duplicate process cleanly.\n")

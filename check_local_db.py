@@ -8,6 +8,7 @@ sys.path.insert(0, str(PROJECT_DIR / "backend"))
 
 def check_db():
     try:
+        # pyrefly: ignore [missing-import]
         from app.database import get_db_connection
         conn = get_db_connection()
         if not conn:

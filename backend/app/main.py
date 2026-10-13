@@ -3449,7 +3449,10 @@ def automatic_monitoring_loop():
 
 
             devices = cursor.fetchall()
-
+            cursor.close()
+            db.close()
+            cursor = None
+            db = None
 
             # ------------------------------------------------
             # CHECK DEVICES
@@ -3560,7 +3563,7 @@ def automatic_monitoring_loop():
         # ----------------------------------------------------
 
         monitoring_stop_event.wait(
-            1
+            5
         )
 
 
@@ -3871,6 +3874,10 @@ def automatic_desktop_monitoring_loop():
                 )
 
             desktops = cursor.fetchall()
+            cursor.close()
+            db.close()
+            cursor = None
+            db = None
 
             # ------------------------------------------
             # CHECK DESKTOPS
@@ -3959,7 +3966,7 @@ def automatic_desktop_monitoring_loop():
         # has elapsed.
         # ------------------------------------------
 
-        desktop_monitoring_stop_event.wait(1)
+        desktop_monitoring_stop_event.wait(5)
 
     print(
         "🛑 NMS automatic desktop monitoring stopped."
@@ -4015,6 +4022,10 @@ def automatic_cctv_monitoring_loop():
             )
 
             cameras = cursor.fetchall()
+            cursor.close()
+            db.close()
+            cursor = None
+            db = None
 
             # ------------------------------------------
             # CHECK EACH CAMERA
@@ -4123,32 +4134,39 @@ def automatic_cctv_monitoring_loop():
                 # SAVE CCTV RESULT
                 # --------------------------------------
 
-                cursor.execute(
-                    """
-                    UPDATE cameras
-                    SET
-                        status = %s,
-                        last_check = %s,
-                        last_latency_ms = %s,
-                        total_checks = %s,
-                        successful_checks = %s,
-                        uptime_percent = %s,
-                        updated_at = %s
-                    WHERE id = %s
-                    """,
-                    (
-                        status,
-                        now,
-                        latency,
-                        total_checks,
-                        successful_checks,
-                        uptime_percent,
-                        now,
-                        camera["id"]
-                    )
-                )
-
-                db.commit()
+                try:
+                    c_db = get_db_connection()
+                    if c_db:
+                        c_cur = c_db.cursor()
+                        c_cur.execute(
+                            """
+                            UPDATE cameras
+                            SET
+                                status = %s,
+                                last_check = %s,
+                                last_latency_ms = %s,
+                                total_checks = %s,
+                                successful_checks = %s,
+                                uptime_percent = %s,
+                                updated_at = %s
+                            WHERE id = %s
+                            """,
+                            (
+                                status,
+                                now,
+                                latency,
+                                total_checks,
+                                successful_checks,
+                                uptime_percent,
+                                now,
+                                camera["id"]
+                            )
+                        )
+                        c_db.commit()
+                        c_cur.close()
+                        c_db.close()
+                except Exception as db_err:
+                    print(f"[CCTV DB Update Error]: {db_err}")
 
                 latency_text = (
                     f"{latency:.1f} ms"
@@ -4193,12 +4211,10 @@ def automatic_cctv_monitoring_loop():
                     pass
 
         # ------------------------------------------
-        # CHECK EVERY 1 SECOND
-        # Actual ping happens only when camera
-        # monitoring interval has elapsed.
+        # CHECK EVERY 5 SECONDS
         # ------------------------------------------
 
-        cctv_monitoring_stop_event.wait(1)
+        cctv_monitoring_stop_event.wait(5)
 
     print(
         "🛑 NMS automatic CCTV monitoring stopped."

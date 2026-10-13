@@ -23,10 +23,12 @@ def _get_env(*names: str, default: str | None = None) -> str | None:
     return default
 
 
+DEFAULT_DB_URL = "mysql://2v9Ac8dmNnbuaJg.root:3K1EV2DPGMMw6yEb@gateway01.ap-southeast-1.prod.aws.tidbcloud.com:4000/test"
+
 def _init_pool():
     global _db_pool
     # 1. Cloud connection URL (TiDB, Aiven, Railway, Render)
-    db_url = _get_env("DATABASE_URL", "MYSQL_URL")
+    db_url = _get_env("DATABASE_URL", "MYSQL_URL", default=DEFAULT_DB_URL)
     if db_url:
         try:
             parsed = urllib.parse.urlparse(db_url)
@@ -39,7 +41,7 @@ def _init_pool():
             try:
                 _db_pool = mysql.connector.pooling.MySQLConnectionPool(
                     pool_name="nms_main_pool",
-                    pool_size=10,
+                    pool_size=32,
                     pool_reset_session=True,
                     host=host,
                     port=port,
@@ -55,7 +57,7 @@ def _init_pool():
                 print(f"[DB Pool SSL init fallback]: {e}")
                 _db_pool = mysql.connector.pooling.MySQLConnectionPool(
                     pool_name="nms_main_pool",
-                    pool_size=10,
+                    pool_size=32,
                     pool_reset_session=True,
                     host=host,
                     port=port,
@@ -79,7 +81,7 @@ def _init_pool():
     try:
         _db_pool = mysql.connector.pooling.MySQLConnectionPool(
             pool_name="nms_main_pool",
-            pool_size=10,
+            pool_size=32,
             pool_reset_session=True,
             host=host,
             port=primary_port,
@@ -102,18 +104,23 @@ def get_db_connection():
                 _init_pool()
 
     if _db_pool is not None:
-        try:
-            conn = _db_pool.get_connection()
-            if conn and conn.is_connected():
-                return conn
-            elif conn:
-                conn.reconnect(attempts=2, delay=1)
-                return conn
-        except Exception as e:
-            print(f"[DB Pool get_connection warning]: {e}")
+        import time
+        for attempt in range(4):
+            try:
+                conn = _db_pool.get_connection()
+                if conn and conn.is_connected():
+                    return conn
+                elif conn:
+                    conn.reconnect(attempts=2, delay=0.2)
+                    return conn
+            except Exception as e:
+                if attempt < 3:
+                    time.sleep(0.1)
+                else:
+                    print(f"[DB Pool busy, trying fallback]: {e}")
 
     # Fallback to direct cloud connection if pool is busy
-    db_url = _get_env("DATABASE_URL", "MYSQL_URL")
+    db_url = _get_env("DATABASE_URL", "MYSQL_URL", default=DEFAULT_DB_URL)
     if db_url:
         try:
             parsed = urllib.parse.urlparse(db_url)
