@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Neo Metaliks | NMS Control Center Login</title>
+    <link rel="icon" type="image/png" href="assets/images/neo-metaliks-logo.png">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -70,19 +71,25 @@
         }
 
         .logo-box {
-            width: 64px;
-            height: 64px;
+            width: 76px;
+            height: 76px;
             margin: 0 auto 16px;
             display: flex;
             align-items: center;
             justify-content: center;
-            border-radius: 16px;
-            background: linear-gradient(135deg, #27a7f4 0%, #126bc0 100%);
-            box-shadow: 0 10px 25px rgba(39, 167, 244, 0.35);
-            font-size: 26px;
-            font-weight: 800;
-            color: #ffffff;
-            letter-spacing: 0.5px;
+            border-radius: 18px;
+            background: #ffffff;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.15);
+            padding: 8px;
+            overflow: hidden;
+        }
+
+        .logo-box img,
+        .brand-logo-img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            display: block;
         }
 
         h1 {
@@ -363,9 +370,10 @@
                 border-radius: 14px;
             }
             .logo-box {
-                width: 54px;
-                height: 54px;
-                font-size: 22px;
+                width: 58px;
+                height: 58px;
+                border-radius: 14px;
+                padding: 6px;
             }
             h1 {
                 font-size: 21px;
@@ -386,7 +394,9 @@
 
             <!-- Brand Header -->
             <div class="brand-header">
-                <div class="logo-box">NM</div>
+                <div class="logo-box">
+                    <img src="assets/images/neo-metaliks-logo.png" alt="Neo Metaliks Logo" class="brand-logo-img">
+                </div>
                 <h1>Neo Metaliks NMS</h1>
                 <p class="subtitle">Network Monitoring & Control Center</p>
             </div>
