@@ -36,6 +36,7 @@ try:
 except Exception:
     pass
 
+# pyrefly: ignore [missing-import]
 from app.database import get_db_connection
 
 _INSTANCE_LOCK_SOCK = None
