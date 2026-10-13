@@ -3189,17 +3189,17 @@ def automatic_ping_device(device):
         ip_address = device["ip_address"]
 
         if is_cloud_environment() and is_private_ip(ip_address):
-            # Cloud container: keep plant status and progress last_check on interval
-            ping_success = (device.get("status") == "Online")
-            latency = float(device.get("last_latency_ms") or 3.0)
-        else:
-            # --------------------------------------------------
-            # EXECUTE REAL RESILIENT PING
-            # --------------------------------------------------
-            ping_success, latency = execute_network_ping(ip_address, timeout_sec=1.0)
-            if ping_success is None:
-                ping_success = (device.get("status") == "Online")
-                latency = float(device.get("last_latency_ms") or 3.0)
+            # Cloud container cannot reach Plant LAN directly (RFC 1918).
+            # On-premises plant probe agent monitors these and syncs live to TiDB Cloud.
+            # Cloud background thread must NOT overwrite on-prem device telemetry.
+            return
+
+        # --------------------------------------------------
+        # EXECUTE REAL RESILIENT PING
+        # --------------------------------------------------
+        ping_success, latency = execute_network_ping(ip_address, timeout_sec=1.0)
+        if ping_success is None:
+            return
 
 
         # --------------------------------------------------
@@ -3436,6 +3436,8 @@ def automatic_monitoring_loop():
                     device_code,
                     device_name,
                     ip_address,
+                    status,
+                    last_latency_ms,
                     monitoring_enabled,
                     monitoring_interval,
                     last_check
@@ -3590,17 +3592,16 @@ def automatic_ping_desktop(desktop):
         ip_address = desktop["ip_address"]
 
         if is_cloud_environment() and is_private_ip(ip_address):
-            # Cloud container: keep plant status and progress last_check on interval
-            ping_success = (desktop.get("status") == "Online")
-            latency = float(desktop.get("last_latency_ms") or 2.0)
-        else:
-            # ------------------------------------------
-            # REAL RESILIENT PING
-            # ------------------------------------------
-            ping_success, latency = execute_network_ping(ip_address, timeout_sec=1.0)
-            if ping_success is None:
-                ping_success = (desktop.get("status") == "Online")
-                latency = float(desktop.get("last_latency_ms") or 2.0)
+            # Cloud container cannot reach Plant LAN directly.
+            # On-premises plant probe agent monitors and syncs live to TiDB Cloud.
+            return
+
+        # ------------------------------------------
+        # REAL RESILIENT PING
+        # ------------------------------------------
+        ping_success, latency = execute_network_ping(ip_address, timeout_sec=1.0)
+        if ping_success is None:
+            return
 
         # ------------------------------------------
         # STATUS
@@ -3837,6 +3838,8 @@ def automatic_desktop_monitoring_loop():
                         desktop_code,
                         location,
                         ip_address,
+                        status,
+                        last_latency_ms,
                         monitoring_enabled,
                         monitoring_interval,
                         last_check
@@ -3856,6 +3859,8 @@ def automatic_desktop_monitoring_loop():
                         desktop_code,
                         location,
                         ip_address,
+                        status,
+                        last_latency_ms,
                         monitoring_enabled,
                         monitoring_interval,
                         last_check
@@ -4073,14 +4078,12 @@ def automatic_cctv_monitoring_loop():
 
                 ip_address = camera["ip_address"]
                 if is_cloud_environment() and is_private_ip(ip_address):
-                    # Cloud container: keep plant status and progress last_check on interval
-                    ping_success = (camera.get("status") == "Online")
-                    latency = float(camera.get("last_latency_ms") or 3.0)
-                else:
-                    ping_success, latency = execute_network_ping(ip_address, timeout_sec=1.0)
-                    if ping_success is None:
-                        ping_success = (camera.get("status") == "Online")
-                        latency = float(camera.get("last_latency_ms") or 3.0)
+                    # Cloud container cannot reach Plant LAN directly.
+                    continue
+
+                ping_success, latency = execute_network_ping(ip_address, timeout_sec=1.0)
+                if ping_success is None:
+                    continue
 
                 # --------------------------------------
                 # NEW STATUS
