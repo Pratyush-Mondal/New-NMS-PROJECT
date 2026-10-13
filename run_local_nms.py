@@ -1,0 +1,62 @@
+import os
+import sys
+import time
+import socket
+from datetime import datetime
+
+PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
+os.chdir(PROJECT_DIR)
+os.makedirs(os.path.join(PROJECT_DIR, "logs"), exist_ok=True)
+LOG_FILE = os.path.join(PROJECT_DIR, "logs", "local_nms.log")
+
+LOCK_PORT = 49255
+_lock_socket = None
+
+def acquire_instance_lock():
+    global _lock_socket
+    try:
+        _lock_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        _lock_socket.bind(("127.0.0.1", LOCK_PORT))
+        _lock_socket.listen(1)
+        return True
+    except socket.error:
+        return False
+
+def check_port_in_use(port=8000):
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(0.5)
+        return s.connect_ex(("127.0.0.1", port)) == 0
+
+def main():
+    if not acquire_instance_lock() or check_port_in_use(8000):
+        with open(LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [INFO] Instance already active or port 8000 in use. Exiting duplicate process cleanly.\n")
+        sys.exit(0)
+
+    # Setup file logging
+    log_fp = open(LOG_FILE, "a", encoding="utf-8", buffering=1)
+    sys.stdout = log_fp
+    sys.stderr = log_fp
+
+    now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    print(f"\n=======================================================")
+    print(f"[{now_str}] Neo Metaliks Local NMS Server Starting...")
+    print(f"Project Directory : {PROJECT_DIR}")
+    print(f"Local Access URL  : http://127.0.0.1:8000")
+    print(f"Single Instance   : Locked on port {LOCK_PORT}")
+    print(f"=======================================================\n")
+
+    sys.path.insert(0, os.path.join(PROJECT_DIR, "backend"))
+
+    try:
+        # pyrefly: ignore [missing-import]
+        import uvicorn
+        uvicorn.run("app.main:app", host="0.0.0.0", port=8000, app_dir="backend", log_level="info")
+    except Exception as e:
+        err_now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        print(f"[{err_now}] [CRITICAL ERROR] Server failed to start: {e}")
+        import traceback
+        traceback.print_exc()
+
+if __name__ == "__main__":
+    main()

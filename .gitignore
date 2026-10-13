@@ -48,6 +48,7 @@ Neo_Metaliks_NMS_Desktop_FIXED/Neo_Metaliks_NMS_CCTV_Device_Ready/uploads/
 /test_*.py
 /test_*.js
 /check_*.py
+!check_local_db.py
 /routes.py
 /verify.py
 /final_verification.py
