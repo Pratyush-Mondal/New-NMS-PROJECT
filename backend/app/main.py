@@ -1915,8 +1915,8 @@ def ping_desktop(
 
         if ping_success is None:
             # Cloud environment querying private IP: use Plant LAN monitor status and update counters
-            status = desktop.get("status") or "Online"
-            latency = float(desktop.get("last_latency_ms") or 2.0)
+            status = desktop.get("status") or "Unknown"
+            latency = float(desktop["last_latency_ms"]) if (desktop.get("last_latency_ms") is not None and status == "Online") else None
             now = datetime.now()
             total_checks = int(desktop.get("total_checks") or 0) + 1
             successful_checks = int(desktop.get("successful_checks") or 0) + (1 if status == "Online" else 0)
@@ -2354,8 +2354,8 @@ def ping_device(
 
         if ping_success is None:
             # Cloud environment querying private IP: use Plant LAN monitor status and update counters
-            status = device.get("status") or "Online"
-            latency = float(device.get("last_latency_ms") or 3.0)
+            status = device.get("status") or "Unknown"
+            latency = float(device["last_latency_ms"]) if (device.get("last_latency_ms") is not None and status == "Online") else None
             now = datetime.now()
             total_checks = int(device.get("total_checks") or 0) + 1
             successful_checks = int(device.get("successful_checks") or 0) + (1 if status == "Online" else 0)
@@ -2782,8 +2782,8 @@ def ping_camera(
 
         if ping_success is None:
             # Cloud environment querying private IP: use Plant LAN monitor status and update counters
-            status = camera.get("status") or "Online"
-            latency = float(camera.get("last_latency_ms") or 3.0)
+            status = camera.get("status") or "Unknown"
+            latency = float(camera["last_latency_ms"]) if (camera.get("last_latency_ms") is not None and status == "Online") else None
             now = datetime.now()
             total_checks = int(camera.get("total_checks") or 0) + 1
             successful_checks = int(camera.get("successful_checks") or 0) + (1 if status == "Online" else 0)

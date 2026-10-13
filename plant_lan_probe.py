@@ -4,6 +4,8 @@ import time
 import subprocess
 import socket
 import re
+import logging
+from logging.handlers import RotatingFileHandler
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 
@@ -13,7 +15,48 @@ BACKEND_DIR = os.path.join(PROJECT_DIR, "backend")
 if BACKEND_DIR not in sys.path:
     sys.path.insert(0, BACKEND_DIR)
 
+# Configure persistent logging (logs/plant_probe.log)
+LOG_DIR = os.path.join(PROJECT_DIR, "logs")
+os.makedirs(LOG_DIR, exist_ok=True)
+LOG_FILE = os.path.join(LOG_DIR, "plant_probe.log")
+
+logger = logging.getLogger("PlantProbe")
+logger.setLevel(logging.INFO)
+
+# Rotating file handler (5MB, 3 backups)
+rfh = RotatingFileHandler(LOG_FILE, maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8")
+rfh.setFormatter(logging.Formatter("[%(asctime)s] [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
+logger.addHandler(rfh)
+
+# Console handler
+try:
+    ch = logging.StreamHandler(sys.stdout)
+    ch.setFormatter(logging.Formatter("[%(asctime)s] [%(levelname)s] %(message)s", datefmt="%H:%M:%S"))
+    logger.addHandler(ch)
+except Exception:
+    pass
+
 from app.database import get_db_connection
+
+_INSTANCE_LOCK_SOCK = None
+
+def acquire_single_instance_lock(port: int = 49250) -> bool:
+    """
+    Prevent launching duplicate monitoring processes on the host.
+    Binds a dedicated loopback port. The OS kernel automatically releases
+    the socket when the process exits or terminates.
+    """
+    global _INSTANCE_LOCK_SOCK
+    _INSTANCE_LOCK_SOCK = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        _INSTANCE_LOCK_SOCK.bind(("127.0.0.1", port))
+        return True
+    except OSError:
+        logger.warning(
+            "Another instance of plant_lan_probe is already running (lock port %d in use). Exiting duplicate process cleanly.",
+            port
+        )
+        return False
 
 def ping_host(ip_address, timeout_sec=0.8):
     """
@@ -62,7 +105,7 @@ def run_probe_cycle():
     """Execute one complete scan across Devices, Cameras, and Desktops and commit to TiDB Cloud."""
     db = get_db_connection()
     if not db:
-        print("[Plant Probe] Database connection failed. Retrying in 5s...")
+        logger.error("Database connection failed. Retrying in next cycle...")
         return
         
     cursor = db.cursor(dictionary=True)
@@ -70,7 +113,7 @@ def run_probe_cycle():
         now = datetime.now()
         
         # 1. Probe Devices
-        cursor.execute("SELECT id, device_code, device_name, ip_address, status, total_checks, successful_checks FROM devices WHERE monitoring_enabled = 1")
+        cursor.execute("SELECT id, device_code, device_name, ip_address, status, last_latency_ms, total_checks, successful_checks FROM devices WHERE monitoring_enabled = 1")
         devices = cursor.fetchall()
         
         def probe_dev(d):
@@ -88,7 +131,7 @@ def run_probe_cycle():
             tot = int(d.get("total_checks") or 0) + 1
             succ = int(d.get("successful_checks") or 0) + (1 if is_online else 0)
             upt = round((succ / tot) * 100, 2)
-            lat_val = lat if is_online else (d.get("last_latency_ms") or 3.0)
+            lat_val = lat if is_online else None
             cursor.execute("""
                 UPDATE devices
                 SET status = %s, last_latency_ms = %s, last_check = %s, total_checks = %s, successful_checks = %s, uptime_percent = %s, updated_at = %s
@@ -96,7 +139,7 @@ def run_probe_cycle():
             """, (st, lat_val, now, tot, succ, upt, now, d["id"]))
             
         # 2. Probe Desktops
-        cursor.execute("SELECT id, desktop_code, ip_address, status, total_checks, successful_checks FROM desktops WHERE monitoring_enabled = 1")
+        cursor.execute("SELECT id, desktop_code, ip_address, status, last_latency_ms, total_checks, successful_checks FROM desktops WHERE monitoring_enabled = 1")
         desktops = cursor.fetchall()
         
         def probe_desk(dk):
@@ -114,7 +157,7 @@ def run_probe_cycle():
             tot = int(dk.get("total_checks") or 0) + 1
             succ = int(dk.get("successful_checks") or 0) + (1 if is_online else 0)
             upt = round((succ / tot) * 100, 2)
-            lat_val = lat if is_online else (dk.get("last_latency_ms") or 2.0)
+            lat_val = lat if is_online else None
             cursor.execute("""
                 UPDATE desktops
                 SET status = %s, last_latency_ms = %s, last_check = %s, total_checks = %s, successful_checks = %s, uptime_percent = %s, updated_at = %s
@@ -122,7 +165,7 @@ def run_probe_cycle():
             """, (st, lat_val, now, tot, succ, upt, now, dk["id"]))
 
         # 3. Probe Cameras
-        cursor.execute("SELECT id, camera_code, camera_name, ip_address, status, total_checks, successful_checks FROM cameras WHERE monitoring_enabled = 1")
+        cursor.execute("SELECT id, camera_code, camera_name, ip_address, status, last_latency_ms, total_checks, successful_checks FROM cameras WHERE monitoring_enabled = 1")
         cameras = cursor.fetchall()
         
         def probe_cam(c):
@@ -140,7 +183,7 @@ def run_probe_cycle():
             tot = int(c.get("total_checks") or 0) + 1
             succ = int(c.get("successful_checks") or 0) + (1 if is_online else 0)
             upt = round((succ / tot) * 100, 2)
-            lat_val = lat if is_online else (c.get("last_latency_ms") or 3.0)
+            lat_val = lat if is_online else None
             cursor.execute("""
                 UPDATE cameras
                 SET status = %s, last_latency_ms = %s, last_check = %s, total_checks = %s, successful_checks = %s, uptime_percent = %s, updated_at = %s
@@ -148,27 +191,35 @@ def run_probe_cycle():
             """, (st, lat_val, now, tot, succ, upt, now, c["id"]))
 
         db.commit()
-        print(f"[{now.strftime('%H:%M:%S')}] Plant Probe Synced -> Devices Online: {dev_online}/{len(devices)} | Desktops: {desk_online}/{len(desktops)} | Cameras: {cam_online}/{len(cameras)}", flush=True)
+        logger.info("Plant Probe Synced -> Devices Online: %d/%d | Desktops: %d/%d | Cameras: %d/%d",
+                    dev_online, len(devices), desk_online, len(desktops), cam_online, len(cameras))
         
     except Exception as e:
         db.rollback()
-        print(f"[Plant Probe Error] {e}")
+        logger.error("Plant Probe DB Error: %s", e)
     finally:
         cursor.close()
         db.close()
 
 def main():
-    print("=" * 60)
-    print("  NEO METALIKS NMS - ON-PREMISES PLANT LAN PROBE AGENT")
-    print("=" * 60)
-    print("Direct physical monitor for Plant LAN (192.168.x.x) -> TiDB Cloud")
+    if not acquire_single_instance_lock():
+        sys.exit(0)
+
+    logger.info("=" * 60)
+    logger.info("  NEO METALIKS NMS - ON-PREMISES PLANT LAN PROBE AGENT")
+    logger.info("=" * 60)
+    logger.info("Direct physical monitor for Plant LAN (192.168.x.x) -> TiDB Cloud")
+    logger.info("Persistent log active: %s", LOG_FILE)
     
     # Run continuous loop
     while True:
         try:
             run_probe_cycle()
+        except KeyboardInterrupt:
+            logger.info("Agent received stop signal. Exiting cleanly.")
+            break
         except Exception as e:
-            print(f"[Loop Exception] {e}")
+            logger.error("Unhandled loop exception: %s", e)
         time.sleep(10)
 
 if __name__ == "__main__":

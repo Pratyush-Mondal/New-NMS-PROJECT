@@ -10,9 +10,18 @@ echo.
 echo Starting direct Plant LAN ping monitor (192.168.x.x) -> TiDB Cloud...
 echo.
 
-.\backend\venv\Scripts\python.exe plant_lan_probe.py
-if %errorlevel% neq 0 (
+if exist ".\backend\venv\Scripts\python.exe" (
+    .\backend\venv\Scripts\python.exe plant_lan_probe.py
+) else (
     python plant_lan_probe.py
+)
+
+if %errorlevel% equ 0 (
+    if exist "logs\plant_probe.log" (
+        echo.
+        echo [Recent Log Entries]:
+        powershell -NoProfile -Command "Get-Content 'logs\plant_probe.log' -Tail 10"
+    )
 )
 
 pause
