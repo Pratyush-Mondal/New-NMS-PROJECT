@@ -56,3 +56,9 @@ Neo_Metaliks_NMS_Desktop_FIXED/Neo_Metaliks_NMS_CCTV_Device_Ready/fix_*.py
 backend/fix_*.py
 backend/test*.py
 backend/app/fix_*.py
+
+# Submissions and Local Private Credentials
+NML_PROJECT_SUBMISSION/
+PRIVATE_CREDENTIALS_LOCAL_ONLY/
+*.zip
+
