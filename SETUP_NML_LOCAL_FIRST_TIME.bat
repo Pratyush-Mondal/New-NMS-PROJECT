@@ -63,7 +63,7 @@ echo [Step 3/6] Verifying and installing required Python packages...
 if exist "backend\requirements.txt" (
     "%PYTHON_EXE%" -m pip install -q -r backend\requirements.txt
     if %errorlevel% neq 0 (
-        echo [WARNING] Pip install reported an issue. Retrying with verbose output...
+        echo [WARNING] Pip install reported an issue. Retrying...
         "%PYTHON_EXE%" -m pip install -r backend\requirements.txt
     )
     echo [OK] Python dependencies verified.
@@ -80,7 +80,7 @@ if exist "check_local_db.py" (
     "%PYTHON_EXE%" check_local_db.py
     if %errorlevel% neq 0 (
         echo [WARNING] Database test returned an issue.
-        echo If running offline, configure MySQL or cloud parameters in 'backend\.env'.
+        echo If running offline, check network connection or parameters in 'backend\.env'.
     )
 ) else (
     echo [INFO] Database check script not present. Continuing...
@@ -102,10 +102,13 @@ if exist "setup_local_autostart.py" (
 echo.
 
 :: -------------------------------------------------------------
-:: Step 6: Test Local Server Startup
+:: Step 6: Test Local Server Startup & Open Directly in Chrome
 :: -------------------------------------------------------------
-echo [Step 6/6] Testing local NMS server startup on http://127.0.0.1:8000...
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$portOpen = $false; $conn = Test-NetConnection -ComputerName 127.0.0.1 -Port 8000 -WarningAction SilentlyContinue; if ($conn.TcpTestSucceeded) { Write-Output '[OK] Port 8000 is already active and responding.' } else { Write-Output '[INFO] Launching background server process...'; Start-Process -FilePath '%PYTHON_EXE%' -ArgumentList 'run_local_nms.py' -WorkingDirectory '%~dp0'; Start-Sleep -Seconds 4; $check = Test-NetConnection -ComputerName 127.0.0.1 -Port 8000 -WarningAction SilentlyContinue; if ($check.TcpTestSucceeded) { Write-Output '[OK] Local server verified listening on 127.0.0.1:8000' } else { Write-Output '[INFO] Server process initializing in background.' } }"
+echo [Step 6/6] Launching local NMS server and verifying health...
+set "PYTHONW_EXE=%PYTHON_EXE:python.exe=pythonw.exe%"
+if not exist "%PYTHONW_EXE%" set "PYTHONW_EXE=%PYTHON_EXE%"
+
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$portOpen = $false; $conn = Test-NetConnection -ComputerName 127.0.0.1 -Port 8000 -WarningAction SilentlyContinue; if ($conn.TcpTestSucceeded) { Write-Output '[OK] Port 8000 is already active and responding.'; $portOpen = $true } else { Write-Output '[INFO] Launching background server process...'; Start-Process -FilePath '%PYTHONW_EXE%' -ArgumentList 'run_local_nms.py' -WorkingDirectory '%~dp0'; for ($i=1; $i -le 15; $i++) { Start-Sleep -Seconds 1; try { $h = Invoke-RestMethod -Uri 'http://127.0.0.1:8000/api/health' -TimeoutSec 2; if ($h.success) { Write-Output '[SUCCESS] Server is online and healthy!'; $portOpen = $true; break } } catch {} } }; if (-not $portOpen) { Write-Output '[INFO] Server initialized in background.' }"
 
 echo.
 echo ===============================================================
@@ -118,21 +121,22 @@ echo  - Single Instance   : Protected (Port 8000 / Socket Lock 49255)
 echo  - Server Log File   : logs\local_nms.log
 echo ===============================================================
 echo.
-echo Quick Control Scripts:
-echo   - START_NML_LOCAL.bat       : Start server manually and open browser
-echo   - CHECK_NML_STATUS.bat      : Check health, port 8000, and logs
-echo   - STOP_NML_LOCAL.bat        : Stop the local server
-echo   - REMOVE_NML_AUTOSTART.bat  : Disable logon autostart
-echo.
 
-set /p OPEN_BROWSER="Would you like to open the local NMS in your browser now? (Y/N): "
-if /i "%OPEN_BROWSER%"=="Y" (
+:: Detect and launch Google Chrome directly, or fallback to default browser
+set "CHROME_EXE="
+if exist "C:\Program Files\Google\Chrome\Application\chrome.exe" set "CHROME_EXE=C:\Program Files\Google\Chrome\Application\chrome.exe"
+if exist "C:\Program Files (x86)\Google\Chrome\Application\chrome.exe" set "CHROME_EXE=C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"
+if exist "%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe" set "CHROME_EXE=%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"
+
+if defined CHROME_EXE (
+    echo [INFO] Opening dashboard directly in Google Chrome...
+    start "" "%CHROME_EXE%" "http://127.0.0.1:8000"
+) else (
+    echo [INFO] Opening dashboard in default web browser...
     start http://127.0.0.1:8000
 )
 
-echo.
-echo Setup finished. Press any key to exit.
-pause >nul
+ping 127.0.0.1 -n 3 >nul
 exit /b 0
 
 :FAIL
