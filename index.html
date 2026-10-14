@@ -1570,8 +1570,10 @@
             <div class="report-download-buttons">
 
                 <button
+                    type="button"
                     class="report-csv-btn"
-                    id="downloadCSV">
+                    id="downloadCSV"
+                    onclick="downloadCSVReport()">
 
                     ↓ CSV
 
@@ -1579,8 +1581,10 @@
 
 
                 <button
+                    type="button"
                     class="report-excel-btn"
-                    id="downloadExcel">
+                    id="downloadExcel"
+                    onclick="downloadExcelReport()">
 
                     ↓ Excel
 
@@ -1588,9 +1592,11 @@
 
 
                 <button
+                    type="button"
                     class="report-zip-btn"
                     id="downloadZIP"
-                    title="Download all sections as separate CSV files in a ZIP archive">
+                    title="Download all sections as separate CSV files in a ZIP archive"
+                    onclick="downloadZipReport()">
 
                     ↓ ZIP (CSVs)
 

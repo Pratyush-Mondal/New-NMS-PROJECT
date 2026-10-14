@@ -4629,6 +4629,24 @@ if (generateReportBtn) {
 
 }
 
+if (reportFromDate) {
+    reportFromDate.addEventListener("change", function () {
+        if (reportFromDate.value && reportToDate.value && reportFromDate.value <= reportToDate.value) {
+            generateNMSReport();
+        }
+    });
+}
+
+if (reportToDate) {
+    reportToDate.addEventListener("change", function () {
+        if (reportFromDate.value && reportToDate.value && reportFromDate.value <= reportToDate.value) {
+            generateNMSReport();
+        }
+    });
+}
+
+window.generateNMSReport = generateNMSReport;
+
 
 async function generateNMSReport() {
 
@@ -4853,8 +4871,8 @@ function renderAnalyticsTable(data) {
             <td><b>${escapeHtml(device.id)}</b></td>
             <td>${escapeHtml(device.name)}</td>
             <td>${escapeHtml(device.type)}</td>
-            <td><span class="${statusClass}">${escapeHtml(device.status)}</span></td>
             <td>${escapeHtml(device.ip)}</td>
+            <td><span class="${statusClass}">${escapeHtml(device.status)}</span></td>
             <td title="${escapeHtml(tooltipTitle)}">${escapeHtml(device.uptime)}</td>
             <td><small>${escapeHtml(device.lastChecked)}</small></td>
         `;
@@ -4945,13 +4963,13 @@ function renderReportTable() {
 
             <td>${device.type}</td>
 
+            <td>${device.ip}</td>
+
             <td>
                 <span class="${statusClass}">
                     ${device.status}
                 </span>
             </td>
-
-            <td>${device.ip}</td>
 
             <td>${device.uptime}</td>
 
@@ -5416,69 +5434,48 @@ async function downloadZipReport() {
 
 
 // ===============================
-// BUTTON CONNECTION
+// BUTTON CONNECTION & EXPORTS
 // ===============================
 
-document.addEventListener("DOMContentLoaded", function () {
+window.downloadCSVReport = downloadCSVReport;
+window.downloadExcelReport = downloadExcelReport;
+window.downloadZipReport = downloadZipReport;
 
-    const csvButton =
-        document.getElementById("downloadCSV");
+function initReportButtons() {
+    const csvButton = document.getElementById("downloadCSV");
+    const excelButton = document.getElementById("downloadExcel");
+    const zipButton = document.getElementById("downloadZIP");
 
-    const excelButton =
-        document.getElementById("downloadExcel");
-
-    const zipButton =
-        document.getElementById("downloadZIP");
-
-
-    if (csvButton) {
-
-        csvButton.addEventListener(
-            "click",
-            function (event) {
-
-                event.preventDefault();
-
-                downloadCSVReport();
-
-            }
-        );
-
+    if (csvButton && !csvButton._hasReportListener) {
+        csvButton._hasReportListener = true;
+        csvButton.addEventListener("click", function (event) {
+            event.preventDefault();
+            downloadCSVReport();
+        });
     }
 
-
-    if (excelButton) {
-
-        excelButton.addEventListener(
-            "click",
-            function (event) {
-
-                event.preventDefault();
-
-                downloadExcelReport();
-
-            }
-        );
-
+    if (excelButton && !excelButton._hasReportListener) {
+        excelButton._hasReportListener = true;
+        excelButton.addEventListener("click", function (event) {
+            event.preventDefault();
+            downloadExcelReport();
+        });
     }
 
-
-    if (zipButton) {
-
-        zipButton.addEventListener(
-            "click",
-            function (event) {
-
-                event.preventDefault();
-
-                downloadZipReport();
-
-            }
-        );
-
+    if (zipButton && !zipButton._hasReportListener) {
+        zipButton._hasReportListener = true;
+        zipButton.addEventListener("click", function (event) {
+            event.preventDefault();
+            downloadZipReport();
+        });
     }
+}
 
-});
+if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", initReportButtons);
+} else {
+    initReportButtons();
+}
 
 // =====================================
 // CLEAR REPORTS HISTORY

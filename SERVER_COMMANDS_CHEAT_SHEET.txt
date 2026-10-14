@@ -1,0 +1,77 @@
+================================================================================
+          NEO METALIKS NMS - CMD PROMPT COMMANDS CHEAT SHEET
+================================================================================
+
+[1] LOCAL WINDOWS PC (COMMAND PROMPT / CMD)
+--------------------------------------------------------------------------------
+1. প্রজেক্ট ফোল্ডারে যান (Go to project directory):
+cd /d "c:\Users\windows10 pro\OneDrive\Desktop\NML PROJECT"
+
+2. Virtual Environment Activate করুন (Activate Venv):
+backend\venv\Scripts\activate
+
+3. Auto-Reload সহ Server চালু করুন (Start server with Auto-Reload):
+cd backend
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+(নোট: --reload দিলে যেকোনো কোড এডিট করলে সার্ভার নিজে নিজেই অটোমেটিক রিলোড হবে)
+
+4. অথবা এক ক্লিকে Local Server চালাতে (Alternative Single Command):
+python run_local_nms.py
+
+5. Virtual Environment বন্ধ করতে (Deactivate Venv):
+deactivate
+
+
+================================================================================
+[2] SIR-ER WINDOWS SERVER-E UPDATE O RELOAD KORAR COMMANDS (CMD)
+--------------------------------------------------------------------------------
+1. সার্ভারের প্রজেক্ট ফোল্ডারে যান:
+cd /d "C:\YourServerProjectFolder\NML PROJECT"
+
+2. গিটহাব থেকে নতুন কোড নিয়ে আসুন (Pull latest code):
+git pull origin main
+
+3. সার্ভারের Virtual Environment এক্টিভ করুন:
+backend\venv\Scripts\activate
+
+4. ডিপেন্ডেন্সি আপডেট করুন (যদি নতুন কিছু থাকে):
+pip install -r backend\requirements.txt
+
+5. সার্ভার রিস্টার্ট / রিলোড করুন:
+- রানিং সার্ভার উইন্ডোতে কীবোর্ডে চাপুন: Ctrl + C
+- তারপর আবার চালু করুন:
+cd backend
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+
+================================================================================
+[3] SIR-ER LINUX / UBUNTU SERVER-E UPDATE O RELOAD COMMANDS (BASH / SSH)
+--------------------------------------------------------------------------------
+1. প্রজেক্ট ফোল্ডারে যান:
+cd /var/www/nms-project   (অথবা যেখানে প্রজেক্ট আছে)
+
+2. লেটেস্ট কোড পুল করুন:
+git pull origin main
+
+3. লিনাক্সে Virtual Environment এক্টিভ করুন:
+source backend/venv/bin/activate
+
+4. ডিপেন্ডেন্সি আপডেট করুন:
+pip install -r backend/requirements.txt
+
+5. সার্ভার রিস্টার্ট করুন:
+(ক) যদি systemctl সার্ভিস থাকে:
+sudo systemctl restart nms
+
+(খ) অথবা ম্যানুয়ালি ব্যাকগ্রাউন্ড প্রসেস রিস্টার্ট করতে:
+pkill -f uvicorn
+nohup uvicorn app.main:app --host 0.0.0.0 --port 8000 --app-dir backend > /tmp/nms.log 2>&1 &
+
+================================================================================
+[4] EMERGENCY: PORT 8000 BLOCK HOLE FREE KORAR COMMAND (WINDOWS CMD)
+--------------------------------------------------------------------------------
+কখনো যদি দেখায় port 8000 already in use, তখন CMD-তে এই দুটি কমান্ড দিন:
+netstat -ano | findstr :8000
+taskkill /F /PID <PID_NUMBER>
+================================================================================
