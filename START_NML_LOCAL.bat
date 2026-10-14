@@ -24,32 +24,13 @@ if not exist "backend\.env" (
     ) > "backend\.env"
 )
 
-:: Locate Python executable
-set "PYTHON_EXE="
-if exist "backend\venv\Scripts\python.exe" (
-    "backend\venv\Scripts\python.exe" -c "import sys; sys.exit(0)" >nul 2>&1
-    if !errorlevel! equ 0 (
-        set "PYTHON_EXE=%~dp0backend\venv\Scripts\python.exe"
-    )
-)
-if not defined PYTHON_EXE (
-    where python >nul 2>&1
-    if !errorlevel! equ 0 (
-        set "PYTHON_EXE=python"
-    ) else (
-        echo [ERROR] Python was not found. Please run SETUP_NML_LOCAL_FIRST_TIME.bat first.
-        pause
-        exit /b 1
-    )
-)
-
 :: Locate Chrome executable if available
 set "CHROME_EXE="
 if exist "C:\Program Files\Google\Chrome\Application\chrome.exe" set "CHROME_EXE=C:\Program Files\Google\Chrome\Application\chrome.exe"
 if exist "C:\Program Files (x86)\Google\Chrome\Application\chrome.exe" set "CHROME_EXE=C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"
 if exist "%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe" set "CHROME_EXE=%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"
 
-:: Check if already running and responding on port 8000
+:: 1. Check if local server is already running and responding
 powershell -NoProfile -ExecutionPolicy Bypass -Command "try { $h = Invoke-RestMethod -Uri 'http://127.0.0.1:8000/api/health' -TimeoutSec 2; if ($h.success) { exit 0 } } catch {}; exit 1"
 if %errorlevel% equ 0 (
     echo [INFO] Neo Metaliks NMS is ALREADY RUNNING and healthy on http://127.0.0.1:8000
@@ -64,32 +45,80 @@ if %errorlevel% equ 0 (
     exit /b 0
 )
 
-echo [INFO] Starting Neo Metaliks Local NMS Server...
-echo [INFO] Port       : 8000
-echo [INFO] Log File   : logs\local_nms.log
-echo.
+:: 2. Detect Python runtime
+set "PYTHON_EXE="
+if exist "backend\venv\Scripts\python.exe" (
+    "backend\venv\Scripts\python.exe" -c "import sys; sys.exit(0)" >nul 2>&1
+    if !errorlevel! equ 0 set "PYTHON_EXE=%~dp0backend\venv\Scripts\python.exe"
+)
+if not defined PYTHON_EXE (
+    where python >nul 2>&1
+    if !errorlevel! equ 0 set "PYTHON_EXE=python"
+)
+if not defined PYTHON_EXE (
+    where py >nul 2>&1
+    if !errorlevel! equ 0 set "PYTHON_EXE=py -3"
+)
+if not defined PYTHON_EXE (
+    for /d %%D in ("%LOCALAPPDATA%\Programs\Python\Python3*" "C:\Program Files\Python3*" "C:\Program Files (x86)\Python3*" "C:\Python3*") do (
+        if exist "%%~D\python.exe" (
+            set "PYTHON_EXE=%%~D\python.exe"
+            goto :START_SERVER
+        )
+    )
+)
 
-set "PYTHONW_EXE=%PYTHON_EXE:python.exe=pythonw.exe%"
-if not exist "%PYTHONW_EXE%" set "PYTHONW_EXE=%PYTHON_EXE%"
+:START_SERVER
+set "TARGET_URL="
 
-start "" "%PYTHONW_EXE%" run_local_nms.py
+if defined PYTHON_EXE (
+    echo [INFO] Starting Neo Metaliks Local NMS Server (0.0.0.0:8000)...
+    set "PYTHONW_EXE=%PYTHON_EXE:python.exe=pythonw.exe%"
+    if not exist "%PYTHONW_EXE%" set "PYTHONW_EXE=%PYTHON_EXE%"
 
-echo Waiting for server to initialize...
-powershell -NoProfile -ExecutionPolicy Bypass -Command "for ($i=1; $i -le 20; $i++) { Start-Sleep -Seconds 1; try { $res = Invoke-RestMethod -Uri 'http://127.0.0.1:8000/api/health' -TimeoutSec 2; if ($res.success) { Write-Output ('[SUCCESS] Server is online and responding! (Ready in ' + $i + 's)'); exit 0 } } catch { Write-Host ('.') -NoNewline } }; Write-Output '[INFO] Server process launched. Ready for connections.'; exit 0"
+    start "" "%PYTHONW_EXE%" run_local_nms.py
+
+    echo Waiting for server to initialize...
+    powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+        "$ready = $false;" ^
+        "for ($i=1; $i -le 15; $i++) {" ^
+        "    Start-Sleep -Seconds 1;" ^
+        "    try { $res = Invoke-RestMethod -Uri 'http://127.0.0.1:8000/api/health' -TimeoutSec 2; if ($res.success) { $ready = $true; break } } catch { Write-Host ('.') -NoNewline };" ^
+        "};" ^
+        "if ($ready) {" ^
+        "    Write-Output 'TARGET=http://127.0.0.1:8000';" ^
+        "} else {" ^
+        "    try { $lan = Invoke-RestMethod -Uri 'http://192.168.115.66:8000/api/health' -TimeoutSec 2; if ($lan.success) { Write-Output 'TARGET=http://192.168.115.66:8000'; exit 0 } } catch {};" ^
+        "    Write-Output 'TARGET=https://neo-metaliks-nms.onrender.com';" ^
+        "}" > "%TEMP%\nms_start_target.txt"
+
+    for /f "tokens=2 delims==" %%A in ('type "%TEMP%\nms_start_target.txt"') do set "TARGET_URL=%%A"
+    if exist "%TEMP%\nms_start_target.txt" del "%TEMP%\nms_start_target.txt"
+) else (
+    echo [INFO] Python not found on this machine. Connecting via Network/Cloud...
+    powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+        "try { $lan = Invoke-RestMethod -Uri 'http://192.168.115.66:8000/api/health' -TimeoutSec 2; if ($lan.success) { Write-Output 'TARGET=http://192.168.115.66:8000'; exit 0 } } catch {};" ^
+        "Write-Output 'TARGET=https://neo-metaliks-nms.onrender.com';" > "%TEMP%\nms_start_target.txt"
+
+    for /f "tokens=2 delims==" %%A in ('type "%TEMP%\nms_start_target.txt"') do set "TARGET_URL=%%A"
+    if exist "%TEMP%\nms_start_target.txt" del "%TEMP%\nms_start_target.txt"
+)
+
+if not defined TARGET_URL set "TARGET_URL=https://neo-metaliks-nms.onrender.com"
 
 echo.
 echo ===============================================================
-echo  Local NMS Server URL : http://127.0.0.1:8000
-echo  Render Cloud URL     : https://neo-metaliks-nms.onrender.com
+echo  Active NMS URL   : %TARGET_URL%
+echo  Render Cloud URL : https://neo-metaliks-nms.onrender.com
 echo ===============================================================
 echo.
 
 if defined CHROME_EXE (
     echo [INFO] Opening dashboard directly in Google Chrome...
-    start "" "%CHROME_EXE%" "http://127.0.0.1:8000"
+    start "" "%CHROME_EXE%" "%TARGET_URL%"
 ) else (
     echo [INFO] Opening dashboard in default web browser...
-    start http://127.0.0.1:8000
+    start %TARGET_URL%
 )
 
 ping 127.0.0.1 -n 3 >nul

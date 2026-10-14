@@ -1,25 +1,19 @@
 (function() {
     function resolveApiBase() {
-        if (window.location.protocol === "file:") {
-            return "http://127.0.0.1:8000";
+        // When loaded over HTTP/HTTPS (via localhost, 0.0.0.0, any LAN IP, or Cloud domain):
+        // Returning "" makes all API calls relative, automatically matching whichever host/IP the browser is on!
+        if (window.location.protocol === "http:" || window.location.protocol === "https:") {
+            if (window.location.port === "8000" || window.location.port === "8081" || !window.location.port) {
+                return "";
+            }
+            return window.location.protocol + "//" + window.location.hostname + ":8000";
         }
-        if (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") {
-            return window.location.port === "8081" ? "" : "http://" + window.location.hostname + ":8000";
-        }
-        if (window.location.hostname.includes("trycloudflare.com")) {
-            return "";
-        }
-        if (window.location.hostname.includes("onrender.com")) {
-            return "";
-        }
-        if (window.location.hostname.includes("vercel.app")) {
-            return "https://neo-metaliks-nms.onrender.com";
-        }
-        return "";
+        // Fallback for file:/// protocol
+        return "http://127.0.0.1:8000";
     }
 
     window.APP_CONFIG = {
-        API_BASE_URL: resolveApiBase()
+        API_BASE_URL: resolveApiBase(),
+        CLOUD_BACKUP_URL: "https://neo-metaliks-nms.onrender.com"
     };
 })();
-

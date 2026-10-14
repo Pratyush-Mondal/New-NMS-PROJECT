@@ -159,18 +159,29 @@ app.include_router(extra_router)
 # ROOT
 # =========================================================
 
-FRONTEND_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-    "Neo_Metaliks_NMS_Desktop_FIXED",
-    "Neo_Metaliks_NMS_CCTV_Device_Ready"
-)
+def get_frontend_candidates():
+    root_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+    return [
+        os.path.join(root_dir, "frontend"),
+        os.path.join(root_dir, "Neo_Metaliks_NMS_Desktop_FIXED", "Neo_Metaliks_NMS_CCTV_Device_Ready"),
+        os.path.join(root_dir, "Neo_Metaliks_NMS_Desktop_FIXED"),
+        root_dir
+    ]
+
+def find_frontend_file(filename: str):
+    clean = filename.lstrip("/\\")
+    for d in get_frontend_candidates():
+        path = os.path.join(d, clean)
+        if os.path.isfile(path):
+            return path
+    return None
 
 from starlette.responses import FileResponse
 
 @app.get("/")
 def root():
-    login_path = os.path.join(FRONTEND_DIR, "login.html")
-    if os.path.isfile(login_path):
+    login_path = find_frontend_file("login.html")
+    if login_path:
         return FileResponse(login_path)
     return {
         "success": True,
@@ -4375,31 +4386,23 @@ def stop_automatic_monitoring():
 # CCTV controls defined above
 
 # ==========================================
-# FRONTEND STATIC FILES FOR CLOUD HOSTING
+# FRONTEND STATIC FILES FOR LOCAL & CLOUD HOSTING
 # ==========================================
 @app.get("/{full_path:path}", include_in_schema=False)
 def serve_frontend_files(full_path: str):
-    root_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-    if not full_path or full_path == "/":
-        target = os.path.join(FRONTEND_DIR, "login.html")
-        if not os.path.isfile(target):
-            target = os.path.join(root_dir, "login.html")
-    else:
-        clean = full_path.lstrip("/")
-        target = os.path.join(FRONTEND_DIR, clean)
-        if not os.path.isfile(target):
-            target = os.path.join(root_dir, clean)
+    clean = (full_path or "").lstrip("/")
+    if not clean or clean == "/":
+        clean = "login.html"
 
-    if os.path.isfile(target):
+    target = find_frontend_file(clean)
+    if target and os.path.isfile(target):
         headers = {}
         if target.endswith((".html", ".js", ".css")):
             headers["Cache-Control"] = "no-cache"
         return FileResponse(target, headers=headers)
 
-    login_fallback = os.path.join(FRONTEND_DIR, "login.html")
-    if not os.path.isfile(login_fallback):
-        login_fallback = os.path.join(root_dir, "login.html")
-    if os.path.isfile(login_fallback):
+    login_fallback = find_frontend_file("login.html")
+    if login_fallback and os.path.isfile(login_fallback):
         return FileResponse(login_fallback)
 
     return {"detail": "Not Found"}
