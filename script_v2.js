@@ -90,6 +90,7 @@ function openPage(pageName, updateHash = true) {
     } else if (pageName === 'settings') {
         if (typeof loadSettings === 'function') loadSettings();
     }
+    if (typeof updateAutoPingBannerUI === 'function') updateAutoPingBannerUI();
     return true;
 }
 
@@ -1389,6 +1390,9 @@ const defaultSettings = {
     cameraMonitoring: true,
     cameraInterval: "30",
 
+    desktopMonitoring: true,
+    desktopInterval: "10",
+
     alert: true,
     soundNotification: true,
 };
@@ -1466,9 +1470,10 @@ async function loadSettings() {
         try {
             const apiBase = (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL !== undefined && window.APP_CONFIG.API_BASE_URL !== null)
                             ? window.APP_CONFIG.API_BASE_URL : (typeof NMS_API_BASE !== 'undefined' ? NMS_API_BASE : "");
-            const [netRes, camRes] = await Promise.allSettled([
+            const [netRes, camRes, deskRes] = await Promise.allSettled([
                 fetch(`${apiBase}/api/settings/network`, { headers: { "Authorization": `Bearer ${token}` } }).then(r => r.json()),
-                fetch(`${apiBase}/api/settings/camera`, { headers: { "Authorization": `Bearer ${token}` } }).then(r => r.json())
+                fetch(`${apiBase}/api/settings/camera`, { headers: { "Authorization": `Bearer ${token}` } }).then(r => r.json()),
+                fetch(`${apiBase}/api/desktops/monitoring`, { headers: { "Authorization": `Bearer ${token}` } }).then(r => r.json())
             ]);
             if (netRes.status === "fulfilled" && netRes.value && netRes.value.interval) {
                 settings.networkInterval = String(netRes.value.interval);
@@ -1478,6 +1483,10 @@ async function loadSettings() {
                 settings.cameraInterval = String(camRes.value.camera_interval);
                 if (camRes.value.camera_retry_interval) settings.cameraRetryInterval = String(camRes.value.camera_retry_interval);
                 if (camRes.value.camera_monitoring !== undefined) settings.cameraMonitoring = Boolean(camRes.value.camera_monitoring);
+            }
+            if (deskRes.status === "fulfilled" && deskRes.value) {
+                if (deskRes.value.interval) settings.desktopInterval = String(deskRes.value.interval);
+                if (deskRes.value.enabled !== undefined) settings.desktopMonitoring = Boolean(deskRes.value.enabled);
             }
             localStorage.setItem("nmsSettings", JSON.stringify(settings));
         } catch (_) {}
@@ -1500,6 +1509,12 @@ async function loadSettings() {
     }
     setSelectValueSafely(get("cameraInterval"), settings.cameraInterval || defaultSettings.cameraInterval);
     setSelectValueSafely(get("cameraRetryInterval"), settings.cameraRetryInterval || 120);
+
+    // DESKTOP
+    if (get("desktopMonitoringSetting")) {
+        get("desktopMonitoringSetting").checked = settings.desktopMonitoring ?? defaultSettings.desktopMonitoring;
+    }
+    setSelectValueSafely(get("desktopInterval"), settings.desktopInterval || settings.networkInterval || defaultSettings.desktopInterval);
 
     // ALERT
     if (get("alert")) {
@@ -1537,10 +1552,12 @@ async function saveSettings() {
         language: get("language") ? get("language").value : "en",
         timeFormat: get("timeFormat") ? get("timeFormat").value : "24",
         networkMonitoring: get("networkMonitoring") ? get("networkMonitoring").checked : true,
-        networkInterval: get("networkInterval") ? get("networkInterval").value : "60",
+        networkInterval: get("networkInterval") ? get("networkInterval").value : "10",
         cameraMonitoring: get("cameraMonitoring") ? get("cameraMonitoring").checked : true,
-        cameraInterval: get("cameraInterval") ? get("cameraInterval").value : "1800",
-        cameraRetryInterval: get("cameraRetryInterval") ? parseInt(get("cameraRetryInterval").value, 10) : 300,
+        cameraInterval: get("cameraInterval") ? get("cameraInterval").value : "30",
+        cameraRetryInterval: get("cameraRetryInterval") ? parseInt(get("cameraRetryInterval").value, 10) : 120,
+        desktopMonitoring: get("desktopMonitoringSetting") ? get("desktopMonitoringSetting").checked : true,
+        desktopInterval: get("desktopInterval") ? get("desktopInterval").value : "10",
         alert: get("alert") ? get("alert").checked : true,
         soundNotification: get("soundNotification") ? get("soundNotification").checked : true,
     };
@@ -1589,6 +1606,23 @@ async function saveSettings() {
         console.error("Network settings sync error:", error);
     }
 
+    // 3. SYNC DESKTOP SETTINGS TO BACKEND
+    try {
+        await fetch(`${apiBase}/api/desktops/monitoring`, {
+            method: "PUT",
+            headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${token}`
+            },
+            body: JSON.stringify({
+                enabled: settings.desktopMonitoring,
+                interval: Number(settings.desktopInterval)
+            })
+        });
+    } catch (error) {
+        console.error("Desktop settings sync error:", error);
+    }
+
     if (typeof syncGlobalSettingsToBackend === 'function') {
         syncGlobalSettingsToBackend(settings);
     }
@@ -1599,14 +1633,16 @@ async function saveSettings() {
     if (typeof updateClock === 'function') updateClock();
 
     // RESTART FRONTEND TIMERS WITH NEW INTERVALS IMMEDIATELY
+    if (typeof resetAutoPingTimers === 'function') resetAutoPingTimers();
     if (typeof startAutoMonitor === 'function') startAutoMonitor();
     if (typeof startBackgroundPinging === 'function') startBackgroundPinging();
 
     const netText = formatIntervalDisplay(settings.networkInterval);
     const camText = formatIntervalDisplay(settings.cameraInterval);
+    const deskText = formatIntervalDisplay(settings.desktopInterval);
     const retryText = formatIntervalDisplay(settings.cameraRetryInterval);
 
-    toast(`✓ Settings saved: Network: ${netText} | Camera: ${camText} | Retry: ${retryText}`);
+    toast(`✓ Settings saved: Devices: ${netText} | CCTV: ${camText} | Desktops: ${deskText}`);
     if (typeof showMessage === 'function') showMessage("✓ Settings saved successfully");
 
     console.log("Settings Saved:", settings);
@@ -1631,6 +1667,8 @@ function resetSettings() {
     if(get("cameraMonitoring")) get("cameraMonitoring").checked = defaultSettings.cameraMonitoring;
     if(get("cameraInterval")) get("cameraInterval").value = defaultSettings.cameraInterval;
     if(get("cameraRetryInterval")) get("cameraRetryInterval").value = defaultSettings.cameraRetryInterval;
+    if(get("desktopMonitoringSetting")) get("desktopMonitoringSetting").checked = defaultSettings.desktopMonitoring;
+    if(get("desktopInterval")) get("desktopInterval").value = defaultSettings.desktopInterval;
     if(get("alert")) get("alert").checked = defaultSettings.alert;
     if(get("soundNotification")) get("soundNotification").checked = defaultSettings.soundNotification;
 
@@ -7264,82 +7302,344 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 
-// --- AUTO MONITORING FIX ---
-let autoMonitorIntervalId = null;
+// =========================================================
+// REAL-TIME AUTO-PING & COUNTDOWN ENGINE
+// Supports: Devices, CCTV Cameras, Desktops
+// Dynamic Settings Interval, Live Visual Countdown, Batch Ping Execution
+// =========================================================
 
+let autoPingEngineTimerId = null;
+let devicePingCountdown = 10;
+let cameraPingCountdown = 30;
+let desktopPingCountdown = 10;
+let isPingingDevices = false;
+let isPingingCameras = false;
+let isPingingDesktops = false;
+
+function getAutoPingIntervals() {
+    let s = {};
+    try { s = JSON.parse(localStorage.getItem('nmsSettings') || '{}'); } catch(e){}
+    return {
+        networkEnabled: s.networkMonitoring !== false,
+        networkInterval: Math.max(3, parseInt(s.networkInterval, 10) || 10),
+        cameraEnabled: s.cameraMonitoring !== false,
+        cameraInterval: Math.max(3, parseInt(s.cameraInterval, 10) || 30),
+        desktopEnabled: s.desktopMonitoring !== false,
+        desktopInterval: Math.max(3, parseInt(s.desktopInterval || s.networkInterval, 10) || 10)
+    };
+}
+
+function resetAutoPingTimers() {
+    const cfg = getAutoPingIntervals();
+    devicePingCountdown = cfg.networkInterval;
+    cameraPingCountdown = cfg.cameraInterval;
+    desktopPingCountdown = cfg.desktopInterval;
+    updateAutoPingBannerUI();
+}
+window.resetAutoPingTimers = resetAutoPingTimers;
+
+function updateAutoPingBannerUI() {
+    const cfg = getAutoPingIntervals();
+
+    // 1. DEVICES BANNER
+    const devBadge = document.getElementById('devicesIntervalBadge');
+    const devCount = document.getElementById('devicesCountdownBadge');
+    const devDot = document.getElementById('devicesPulseDot');
+    if (devBadge) devBadge.innerHTML = `Interval: <b>${formatIntervalDisplay(cfg.networkInterval)}</b>`;
+    if (devCount) {
+        if (!cfg.networkEnabled) {
+            devCount.className = 'auto-ping-badge';
+            devCount.innerHTML = '⏸ Paused (Disabled in Settings)';
+            if (devDot) devDot.style.background = '#64748b';
+        } else if (!isPingingDevices) {
+            devCount.className = 'auto-ping-badge';
+            devCount.innerHTML = `Next ping in <b id="devicesCountdownText">${devicePingCountdown}s</b>`;
+            if (devDot) devDot.style.background = '#10b981';
+        }
+    }
+
+    // 2. CAMERAS BANNER
+    const camBadge = document.getElementById('camerasIntervalBadge');
+    const camCount = document.getElementById('camerasCountdownBadge');
+    const camDot = document.getElementById('camerasPulseDot');
+    if (camBadge) camBadge.innerHTML = `Interval: <b>${formatIntervalDisplay(cfg.cameraInterval)}</b>`;
+    if (camCount) {
+        if (!cfg.cameraEnabled) {
+            camCount.className = 'auto-ping-badge';
+            camCount.innerHTML = '⏸ Paused (Disabled in Settings)';
+            if (camDot) camDot.style.background = '#64748b';
+        } else if (!isPingingCameras) {
+            camCount.className = 'auto-ping-badge';
+            camCount.innerHTML = `Next ping in <b id="camerasCountdownText">${cameraPingCountdown}s</b>`;
+            if (camDot) camDot.style.background = '#10b981';
+        }
+    }
+
+    // 3. DESKTOPS BANNER
+    const deskBadge = document.getElementById('desktopsIntervalBadge');
+    const deskCount = document.getElementById('desktopsCountdownBadge');
+    const deskDot = document.getElementById('desktopsPulseDot');
+    if (deskBadge) deskBadge.innerHTML = `Interval: <b>${formatIntervalDisplay(cfg.desktopInterval)}</b>`;
+    if (deskCount) {
+        if (!cfg.desktopEnabled) {
+            deskCount.className = 'auto-ping-badge';
+            deskCount.innerHTML = '⏸ Paused (Disabled in Settings)';
+            if (deskDot) deskDot.style.background = '#64748b';
+        } else if (!isPingingDesktops) {
+            deskCount.className = 'auto-ping-badge';
+            deskCount.innerHTML = `Next ping in <b id="desktopsCountdownText">${desktopPingCountdown}s</b>`;
+            if (deskDot) deskDot.style.background = '#10b981';
+        }
+    }
+}
+
+// BATCH PING DEVICES
+async function triggerAutoPingAllDevices(isManual = false) {
+    if (isPingingDevices) return;
+    const token = localStorage.getItem('access_token');
+    if (!token) return;
+
+    isPingingDevices = true;
+    const countBadge = document.getElementById('devicesCountdownBadge');
+    const btn = document.getElementById('triggerDevicesPingBtn');
+    if (countBadge) {
+        countBadge.className = 'auto-ping-badge is-pinging';
+        countBadge.innerHTML = '⚡ Pinging all devices...';
+    }
+    if (btn) btn.disabled = true;
+
+    try {
+        const apiBase = (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL) || (typeof NMS_API_BASE !== 'undefined' ? NMS_API_BASE : '');
+        const res = await fetch(`${apiBase}/api/devices/ping-all`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.success && Array.isArray(data.devices)) {
+            const prevOfflineCount = (window.backendDevices || []).filter(d => d.status === 'Offline').length;
+            const newOfflineCount = data.devices.filter(d => d.status === 'Offline').length;
+            if (newOfflineCount > prevOfflineCount && typeof playSound === 'function') {
+                playSound('alert');
+            }
+
+            window.backendDevices = data.devices;
+            if (typeof renderBackendDevices === 'function') {
+                renderBackendDevices(window.backendDevices);
+            }
+            if (typeof loadDashboardStats === 'function') {
+                loadDashboardStats();
+            }
+
+            const nowTime = new Date().toLocaleTimeString();
+            const lastSync = document.getElementById('devicesLastSyncText');
+            if (lastSync) lastSync.textContent = `✓ Synced at ${nowTime}`;
+            if (isManual) toast(`✓ All ${data.devices.length} devices pinged & refreshed`);
+        }
+    } catch (err) {
+        console.warn('Devices auto-ping batch error:', err);
+    } finally {
+        isPingingDevices = false;
+        if (btn) btn.disabled = false;
+        const cfg = getAutoPingIntervals();
+        devicePingCountdown = cfg.networkInterval;
+        updateAutoPingBannerUI();
+    }
+}
+window.triggerAutoPingAllDevices = triggerAutoPingAllDevices;
+
+// BATCH PING CAMERAS
+async function triggerAutoPingAllCameras(isManual = false) {
+    if (isPingingCameras) return;
+    const token = localStorage.getItem('access_token');
+    if (!token) return;
+
+    isPingingCameras = true;
+    const countBadge = document.getElementById('camerasCountdownBadge');
+    const btn = document.getElementById('triggerCamerasPingBtn');
+    if (countBadge) {
+        countBadge.className = 'auto-ping-badge is-pinging';
+        countBadge.innerHTML = '⚡ Pinging all CCTV...';
+    }
+    if (btn) btn.disabled = true;
+
+    try {
+        const apiBase = (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL) || (typeof NMS_API_BASE !== 'undefined' ? NMS_API_BASE : '');
+        const res = await fetch(`${apiBase}/api/cameras/ping-all`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.success && Array.isArray(data.cameras)) {
+            const prevOfflineCount = (window.backendCameras || []).filter(c => c.status === 'Offline').length;
+            const newOfflineCount = data.cameras.filter(c => c.status === 'Offline').length;
+            if (newOfflineCount > prevOfflineCount && typeof playSound === 'function') {
+                playSound('alert');
+            }
+
+            window.backendCameras = data.cameras;
+            if (typeof renderBackendCameras === 'function') {
+                renderBackendCameras(window.backendCameras);
+            }
+            if (typeof updateCameraDashboardStats === 'function') {
+                updateCameraDashboardStats(window.backendCameras);
+            }
+
+            const nowTime = new Date().toLocaleTimeString();
+            const lastSync = document.getElementById('camerasLastSyncText');
+            if (lastSync) lastSync.textContent = `✓ Synced at ${nowTime}`;
+            if (isManual) toast(`✓ All ${data.cameras.length} CCTV cameras pinged & refreshed`);
+        }
+    } catch (err) {
+        console.warn('Cameras auto-ping batch error:', err);
+    } finally {
+        isPingingCameras = false;
+        if (btn) btn.disabled = false;
+        const cfg = getAutoPingIntervals();
+        cameraPingCountdown = cfg.cameraInterval;
+        updateAutoPingBannerUI();
+    }
+}
+window.triggerAutoPingAllCameras = triggerAutoPingAllCameras;
+
+// BATCH PING DESKTOPS
+async function triggerAutoPingAllDesktops(isManual = false) {
+    if (isPingingDesktops) return;
+    const token = localStorage.getItem('access_token');
+    if (!token) return;
+
+    isPingingDesktops = true;
+    const countBadge = document.getElementById('desktopsCountdownBadge');
+    const btn = document.getElementById('triggerDesktopsPingBtn');
+    if (countBadge) {
+        countBadge.className = 'auto-ping-badge is-pinging';
+        countBadge.innerHTML = '⚡ Pinging all desktops...';
+    }
+    if (btn) btn.disabled = true;
+
+    try {
+        const apiBase = (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL) || (typeof NMS_API_BASE !== 'undefined' ? NMS_API_BASE : '');
+        const res = await fetch(`${apiBase}/api/desktops/ping-all`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.success && Array.isArray(data.desktops)) {
+            const prevOfflineCount = (window.desktopData || []).filter(d => d.status === 'Offline').length;
+            const newOfflineCount = data.desktops.filter(d => d.status === 'Offline').length;
+            if (newOfflineCount > prevOfflineCount && typeof playSound === 'function') {
+                playSound('alert');
+            }
+
+            window.desktopData = data.desktops.map(desktop => ({
+                backendId: Number(desktop.id),
+                id: desktop.desktop_code || '',
+                department: desktop.department || '',
+                location: desktop.location || '',
+                ip: desktop.ip_address || '',
+                os: desktop.operating_system || '',
+                cpu: `${Number(desktop.cpu_usage ?? 0)}%`,
+                ram: `${Number(desktop.ram_usage ?? 0)}%`,
+                status: desktop.status || 'Unknown',
+                monitoring_enabled: desktop.monitoring_enabled,
+                monitoring_interval: desktop.monitoring_interval,
+                last_check: desktop.last_check,
+                last_latency_ms: desktop.last_latency_ms,
+                total_checks: desktop.total_checks,
+                successful_checks: desktop.successful_checks,
+                uptime_percent: desktop.uptime_percent
+            }));
+
+            if (typeof renderDesktopRows === 'function') {
+                renderDesktopRows(window.desktopData);
+            }
+            if (typeof updateDesktopStats === 'function') {
+                updateDesktopStats();
+            }
+
+            const nowTime = new Date().toLocaleTimeString();
+            const lastSync = document.getElementById('desktopsLastSyncText');
+            if (lastSync) lastSync.textContent = `✓ Synced at ${nowTime}`;
+            if (isManual) toast(`✓ All ${data.desktops.length} desktops pinged & refreshed`);
+        }
+    } catch (err) {
+        console.warn('Desktops auto-ping batch error:', err);
+    } finally {
+        isPingingDesktops = false;
+        if (btn) btn.disabled = false;
+        const cfg = getAutoPingIntervals();
+        desktopPingCountdown = cfg.desktopInterval;
+        updateAutoPingBannerUI();
+    }
+}
+window.triggerAutoPingAllDesktops = triggerAutoPingAllDesktops;
+
+// MAIN TICKER (RUNS EVERY 1 SECOND)
 function startAutoMonitor() {
-    if (autoMonitorIntervalId) clearInterval(autoMonitorIntervalId);
-    let tick = 0;
-    
-    autoMonitorIntervalId = setInterval(() => {
+    if (autoPingEngineTimerId) clearInterval(autoPingEngineTimerId);
+    resetAutoPingTimers();
+
+    let globalTick = 0;
+    autoPingEngineTimerId = setInterval(() => {
         const token = localStorage.getItem('access_token');
         if (!token) return;
-        tick++;
 
-        // Read dynamically so it respects settings immediately without restart
-        let s = {};
-        try { s = JSON.parse(localStorage.getItem('nmsSettings') || '{}'); } catch(e){}
-        let netInterval = Math.max(3, parseInt(s.networkInterval) || 10);
-        let camInterval = Math.max(3, parseInt(s.cameraInterval) || 15);
+        globalTick++;
+        const cfg = getAutoPingIntervals();
 
-        const pageName = window.currentPage || document.querySelector('.page.active')?.id || 'dashboard';
-        
-        // Global stats & alerts refresh every 5s
-        if (tick % 5 === 0) {
+        // 1. Tick devices
+        if (cfg.networkEnabled) {
+            devicePingCountdown--;
+            if (devicePingCountdown <= 0) {
+                triggerAutoPingAllDevices(false);
+            }
+        }
+
+        // 2. Tick cameras
+        if (cfg.cameraEnabled) {
+            cameraPingCountdown--;
+            if (cameraPingCountdown <= 0) {
+                triggerAutoPingAllCameras(false);
+            }
+        }
+
+        // 3. Tick desktops
+        if (cfg.desktopEnabled) {
+            desktopPingCountdown--;
+            if (desktopPingCountdown <= 0) {
+                triggerAutoPingAllDesktops(false);
+            }
+        }
+
+        // 4. Update banner visual labels & countdown numbers
+        updateAutoPingBannerUI();
+
+        // 5. Global dashboard stats and alerts polling every 5s
+        if (globalTick % 5 === 0) {
             if (typeof loadDashboardStats === 'function') loadDashboardStats();
-            if (pageName === 'alerts' && typeof loadAlerts === 'function') loadAlerts();
-        }
-        
-        // Network Devices & Desktops based on networkMonitoring and networkInterval
-        let netEnabled = s.networkMonitoring !== false;
-        if (netEnabled && tick % netInterval === 0) {
-            if (typeof loadDevicesFromBackend === 'function') loadDevicesFromBackend();
-            if (typeof refreshDesktopData === 'function') refreshDesktopData();
-        }
-        
-        // Cameras based on cameraMonitoring and cameraInterval
-        let camEnabled = s.cameraMonitoring !== false;
-        if (camEnabled && tick % camInterval === 0) {
-            if (typeof loadCamerasFromBackend === 'function') loadCamerasFromBackend();
+            const activePage = window.currentPage || document.querySelector('.page.active')?.id || 'dashboard';
+            if (activePage === 'alerts' && typeof loadAlerts === 'function') loadAlerts();
         }
     }, 1000);
 }
 window.startAutoMonitor = startAutoMonitor;
 
 document.addEventListener('DOMContentLoaded', () => {
-    setTimeout(startAutoMonitor, 2000);
+    setTimeout(() => {
+        startAutoMonitor();
+    }, 1500);
 });
-// ---------------------------
 
-// --- BACKGROUND STATUS SYNC TASKS ---
-let syncIntervalId = null;
-
+// Backward compatibility alias
 function startBackgroundPinging() {
-    if (syncIntervalId) clearInterval(syncIntervalId);
-
-    // Smooth status sync every 30 seconds without flooding the cloud server
-    syncIntervalId = setInterval(async () => {
-        if (localStorage.getItem('adminLoggedIn') !== 'true') return;
-        const page = window.currentPage || document.querySelector('.page.active')?.id || 'dashboard';
-        try {
-            if (page === 'dashboard' && typeof loadDashboardStats === 'function') {
-                await loadDashboardStats();
-            } else if (page === 'devices' && typeof loadDevicesFromBackend === 'function') {
-                await loadDevicesFromBackend();
-            } else if (page === 'cameras' && typeof loadCamerasFromBackend === 'function') {
-                await loadCamerasFromBackend();
-            } else if (page === 'desktops' && typeof refreshDesktopData === 'function') {
-                await refreshDesktopData();
-            }
-        } catch (e) {
-            console.warn('Background sync warning:', e);
-        }
-    }, 30000);
+    // startAutoMonitor already performs live tick & background batch pings
 }
-
-document.addEventListener('DOMContentLoaded', () => {
-    setTimeout(startBackgroundPinging, 5000);
-});
+window.startBackgroundPinging = startBackgroundPinging;
 // -----------------------------------------
 
 /* =========================================================

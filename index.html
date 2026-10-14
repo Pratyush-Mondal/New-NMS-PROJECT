@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Neo Metaliks | NMS Control Center</title>
 <link rel="icon" type="image/png" href="assets/images/neo-metaliks-logo.png">
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css?v=12">
 <script src="config.js"></script>
 <script>
 (async function checkAuthentication() {
@@ -643,6 +643,23 @@
 
 </div>
         </div>
+
+        <!-- LIVE AUTO-PING STATUS BANNER -->
+        <div class="auto-ping-banner" id="devicesAutoPingBanner">
+          <div class="auto-ping-info">
+            <span class="auto-ping-dot pulse-dot" id="devicesPulseDot"></span>
+            <span class="auto-ping-title">Device Auto-Ping Active</span>
+            <span class="auto-ping-chip" id="devicesIntervalBadge">Interval: <b>10s</b></span>
+            <span class="auto-ping-badge" id="devicesCountdownBadge">Next ping in <b id="devicesCountdownText">10s</b></span>
+            <span class="auto-ping-sync-time" id="devicesLastSyncText">Ready</span>
+          </div>
+          <div class="auto-ping-actions">
+            <button type="button" class="auto-ping-btn" id="triggerDevicesPingBtn" onclick="triggerAutoPingAllDevices(true)">
+              ⚡ Ping All Devices Now
+            </button>
+          </div>
+        </div>
+
         <div class="toolbar"><input id="deviceSearch" placeholder="&#128269;  Search device, IP or location..." oninput="filterDevices()"><select id="deviceTypeFilter" onchange="filterDevices()"><option value="All Types">All Types</option><option value="Switch">Switch</option><option value="Router">Router</option><option value="Access Point">Access Point</option><option value="Firewall">Firewall</option></select><select id="deviceStatusFilter" onchange="filterDevices()"><option value="All Status">All Status</option><option value="Online">Online</option><option value="Offline">Offline</option></select></div>
   <div class="card table-wrap">
 
@@ -744,6 +761,22 @@
 </div>
         </div>
      
+        <!-- CCTV LIVE AUTO-PING STATUS BANNER -->
+        <div class="auto-ping-banner" id="camerasAutoPingBanner">
+          <div class="auto-ping-info">
+            <span class="auto-ping-dot pulse-dot" id="camerasPulseDot"></span>
+            <span class="auto-ping-title">CCTV Auto-Ping Active</span>
+            <span class="auto-ping-chip" id="camerasIntervalBadge">Interval: <b>15s</b></span>
+            <span class="auto-ping-badge" id="camerasCountdownBadge">Next ping in <b id="camerasCountdownText">15s</b></span>
+            <span class="auto-ping-sync-time" id="camerasLastSyncText">Ready</span>
+          </div>
+          <div class="auto-ping-actions">
+            <button type="button" class="auto-ping-btn" id="triggerCamerasPingBtn" onclick="triggerAutoPingAllCameras(true)">
+              ⚡ Ping All CCTV Now
+            </button>
+          </div>
+        </div>
+
         <!-- CCTV LIVE SUMMARY -->
 <div class="cctv-summary-grid">
 
@@ -1217,6 +1250,21 @@
 </button>
     </div>
 
+    <!-- DESKTOP LIVE AUTO-PING STATUS BANNER -->
+    <div class="auto-ping-banner" id="desktopsAutoPingBanner">
+      <div class="auto-ping-info">
+        <span class="auto-ping-dot pulse-dot" id="desktopsPulseDot"></span>
+        <span class="auto-ping-title">Desktop Auto-Ping Active</span>
+        <span class="auto-ping-chip" id="desktopsIntervalBadge">Interval: <b>10s</b></span>
+        <span class="auto-ping-badge" id="desktopsCountdownBadge">Next ping in <b id="desktopsCountdownText">10s</b></span>
+        <span class="auto-ping-sync-time" id="desktopsLastSyncText">Ready</span>
+      </div>
+      <div class="auto-ping-actions">
+        <button type="button" class="auto-ping-btn" id="triggerDesktopsPingBtn" onclick="triggerAutoPingAllDesktops(true)">
+          ⚡ Ping All Desktops Now
+        </button>
+      </div>
+    </div>
 
     <!-- Desktop Summary -->
 
@@ -1796,6 +1844,47 @@
     </div>
 
 
+    <!-- DESKTOP MONITORING -->
+    <div class="settings-card">
+
+        <h2>🖥️ Desktop Monitoring</h2>
+
+        <div class="setting-row">
+
+            <div>
+                <strong>Desktop Monitoring</strong>
+                <p>Enable or disable automated desktop ping and monitoring</p>
+            </div>
+
+            <label class="switch">
+                <input type="checkbox" id="desktopMonitoringSetting" checked>
+                <span class="slider"></span>
+            </label>
+
+        </div>
+
+        <div class="setting-item">
+
+            <label>Desktop Check Interval</label>
+
+            <select id="desktopInterval">
+                <option value="5">5 Seconds</option>
+                <option value="10">10 Seconds</option>
+                <option value="30">30 Seconds</option>
+                <option value="60">1 Minute</option>
+                <option value="120">2 Minutes</option>
+                <option value="300">5 Minutes</option>
+                <option value="600">10 Minutes</option>
+                <option value="900">15 Minutes</option>
+                <option value="1800">30 Minutes</option>
+                <option value="3600">1 Hour</option>
+            </select>
+
+        </div>
+
+    </div>
+
+
     <!-- ALERT SETTINGS -->
     <div class="settings-card">
 
@@ -2056,7 +2145,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="config.js"></script>
-<script src="script_v2.js?v=11"></script>
+<script src="script_v2.js?v=12"></script>
 
 <script type="text/javascript">
 function googleTranslateElementInit() {

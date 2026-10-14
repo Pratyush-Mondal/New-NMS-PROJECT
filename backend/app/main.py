@@ -22,6 +22,7 @@ import ipaddress
 import threading
 import time
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import socket
 import errno
 import shutil
@@ -694,6 +695,7 @@ class DesktopMonitoringSettingsRequest(BaseModel):
 
     enabled: bool
     selected_location: str | None = None
+    interval: int | None = None
 
       # ==========================================
 # DESKTOPS - GET ALL DESKTOPS
@@ -1376,6 +1378,7 @@ class NetworkMonitoringSettingsRequest(BaseModel):
 class DesktopMonitoringSettingsRequest(BaseModel):
     enabled: bool
     selected_location: str | None = None
+    interval: int | None = None
 
     # ==========================================
 # GET NETWORK MONITORING SETTINGS
@@ -1565,10 +1568,15 @@ def get_desktop_monitoring_settings(
                 "selected_location": None
             }
 
+        cursor.execute("SELECT COALESCE(MIN(monitoring_interval), 30) AS interval FROM desktops")
+        int_row = cursor.fetchone()
+        desk_interval = int(int_row["interval"] or 30) if int_row else 30
+
         return {
             "success": True,
             "enabled": bool(settings["enabled"]),
-            "selected_location": settings["selected_location"]
+            "selected_location": settings["selected_location"],
+            "interval": desk_interval
         }
 
     finally:
@@ -1662,6 +1670,15 @@ def update_desktop_monitoring_settings(
             """)
 
         # ======================================
+        # UPDATE INTERVAL IF PROVIDED
+        # ======================================
+        if request.interval and request.interval > 0:
+            cursor.execute("""
+                UPDATE desktops
+                SET monitoring_interval = %s
+            """, (request.interval,))
+
+        # ======================================
         # SAVE MASTER MONITORING STATE
         # ======================================
 
@@ -1688,7 +1705,8 @@ def update_desktop_monitoring_settings(
                 else "Desktop monitoring disabled."
             ),
             "enabled": bool(request.enabled),
-            "selected_location": selected_location
+            "selected_location": selected_location,
+            "interval": request.interval
         }
 
     except HTTPException:
@@ -2015,10 +2033,95 @@ def ping_desktop(
             db.close()
 
 
-
-    # ==========================================
-# DEVICES - CREATE DEVICE
 # ==========================================
+# DESKTOPS - PING ALL DESKTOPS BATCH
+# ==========================================
+
+@app.post("/api/desktops/ping-all")
+def ping_all_desktops_endpoint(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    token = credentials.credentials
+    admin = get_admin_from_token(token)
+    if admin is None:
+        raise HTTPException(status_code=401, detail="Invalid or expired token.")
+
+    db = get_db_connection()
+    if not db:
+        raise HTTPException(status_code=500, detail="Database connection failed")
+    cursor = None
+    try:
+        cursor = db.cursor(dictionary=True)
+        cursor.execute("SELECT id, desktop_code, department, location, ip_address, status, last_latency_ms, total_checks, successful_checks FROM desktops WHERE monitoring_enabled IS NULL OR monitoring_enabled = 1")
+        desktops = cursor.fetchall()
+        cursor.close()
+        db.close()
+        db = None
+        cursor = None
+
+        def _ping_single_desk(desk):
+            ip = desk.get("ip_address")
+            success, lat = execute_network_ping(ip, timeout_sec=0.8)
+            now = datetime.now()
+            if success is None:
+                st = desk.get("status") or "Unknown"
+                lat = float(desk["last_latency_ms"]) if (desk.get("last_latency_ms") is not None and st == "Online") else None
+            else:
+                st = "Online" if success else "Offline"
+            tot = int(desk.get("total_checks") or 0) + 1
+            suc = int(desk.get("successful_checks") or 0) + (1 if st == "Online" else 0)
+            upt = round((suc / tot) * 100, 2)
+            return {
+                "id": desk["id"],
+                "status": st,
+                "latency_ms": lat,
+                "total_checks": tot,
+                "successful_checks": suc,
+                "uptime_percent": upt,
+                "last_check": now
+            }
+
+        results = []
+        if desktops:
+            with ThreadPoolExecutor(max_workers=min(20, len(desktops))) as executor:
+                futures = [executor.submit(_ping_single_desk, d) for d in desktops]
+                for fut in as_completed(futures):
+                    try:
+                        results.append(fut.result())
+                    except Exception:
+                        pass
+
+        if results:
+            db_w = get_db_connection()
+            if db_w:
+                cur_w = db_w.cursor()
+                for r in results:
+                    cur_w.execute("""
+                        UPDATE desktops
+                        SET status = %s, last_latency_ms = %s, last_check = %s, total_checks = %s, successful_checks = %s, uptime_percent = %s, updated_at = %s
+                        WHERE id = %s
+                    """, (r["status"], r["latency_ms"], r["last_check"], r["total_checks"], r["successful_checks"], r["uptime_percent"], r["last_check"], r["id"]))
+                db_w.commit()
+                cur_w.close()
+                db_w.close()
+
+        db_r = get_db_connection()
+        if db_r:
+            cur_r = db_r.cursor(dictionary=True)
+            cur_r.execute("SELECT * FROM desktops ORDER BY id")
+            all_desktops = cur_r.fetchall()
+            cur_r.close()
+            db_r.close()
+            return {"success": True, "count": len(all_desktops), "desktops": all_desktops}
+        return {"success": True, "count": 0, "desktops": []}
+    except Exception as err:
+        raise HTTPException(status_code=500, detail=str(err))
+    finally:
+        if cursor:
+            try: cursor.close()
+            except Exception: pass
+        if db:
+            try: db.close()
+            except Exception: pass
+
 
 # ==========================================
 # CREATE DEVICE
@@ -2465,6 +2568,87 @@ def ping_device(
         db.close()
 
 
+@app.post("/api/devices/ping-all")
+def ping_all_devices_endpoint(admin=Depends(get_current_admin)):
+    db = get_db_connection()
+    if not db:
+        raise HTTPException(status_code=500, detail="Database connection failed")
+    cursor = None
+    try:
+        cursor = db.cursor(dictionary=True)
+        cursor.execute("SELECT id, device_code, device_name, ip_address, status, last_latency_ms, total_checks, successful_checks FROM devices WHERE monitoring_enabled = 1")
+        devices = cursor.fetchall()
+        cursor.close()
+        db.close()
+        db = None
+        cursor = None
+
+        def _ping_single_dev(dev):
+            ip = dev.get("ip_address")
+            success, lat = execute_network_ping(ip, timeout_sec=0.8)
+            now = datetime.now()
+            if success is None:
+                st = dev.get("status") or "Unknown"
+                lat = float(dev["last_latency_ms"]) if (dev.get("last_latency_ms") is not None and st == "Online") else None
+            else:
+                st = "Online" if success else "Offline"
+            tot = int(dev.get("total_checks") or 0) + 1
+            suc = int(dev.get("successful_checks") or 0) + (1 if st == "Online" else 0)
+            upt = round((suc / tot) * 100, 2)
+            return {
+                "id": dev["id"],
+                "status": st,
+                "latency_ms": lat,
+                "total_checks": tot,
+                "successful_checks": suc,
+                "uptime_percent": upt,
+                "last_check": now
+            }
+
+        results = []
+        if devices:
+            with ThreadPoolExecutor(max_workers=min(20, len(devices))) as executor:
+                futures = [executor.submit(_ping_single_dev, d) for d in devices]
+                for fut in as_completed(futures):
+                    try:
+                        results.append(fut.result())
+                    except Exception:
+                        pass
+
+        if results:
+            db_w = get_db_connection()
+            if db_w:
+                cur_w = db_w.cursor()
+                for r in results:
+                    cur_w.execute("""
+                        UPDATE devices
+                        SET status = %s, last_latency_ms = %s, last_check = %s, total_checks = %s, successful_checks = %s, uptime_percent = %s, updated_at = %s
+                        WHERE id = %s
+                    """, (r["status"], r["latency_ms"], r["last_check"], r["total_checks"], r["successful_checks"], r["uptime_percent"], r["last_check"], r["id"]))
+                db_w.commit()
+                cur_w.close()
+                db_w.close()
+
+        db_r = get_db_connection()
+        if db_r:
+            cur_r = db_r.cursor(dictionary=True)
+            cur_r.execute("SELECT * FROM devices ORDER BY id")
+            all_devices = cur_r.fetchall()
+            cur_r.close()
+            db_r.close()
+            return {"success": True, "devices": all_devices}
+        return {"success": True, "devices": []}
+    except Exception as err:
+        raise HTTPException(status_code=500, detail=str(err))
+    finally:
+        if cursor:
+            try: cursor.close()
+            except Exception: pass
+        if db:
+            try: db.close()
+            except Exception: pass
+
+
 # ==========================================
 # CCTV - GET ALL CAMERAS
 # ==========================================
@@ -2891,6 +3075,93 @@ def ping_camera(
             cursor.close()
 
         db.close()
+
+
+@app.post("/api/cameras/ping-all")
+def ping_all_cameras_endpoint(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    token = credentials.credentials
+    admin = get_admin_from_token(token)
+    if admin is None:
+        raise HTTPException(status_code=401, detail="Invalid or expired token.")
+
+    db = get_db_connection()
+    if not db:
+        raise HTTPException(status_code=500, detail="Database connection failed")
+    cursor = None
+    try:
+        cursor = db.cursor(dictionary=True)
+        cursor.execute("SELECT id, camera_code, camera_name, ip_address, status, last_latency_ms, total_checks, successful_checks FROM cameras WHERE monitoring_enabled = 1")
+        cameras = cursor.fetchall()
+        cursor.close()
+        db.close()
+        db = None
+        cursor = None
+
+        def _ping_single_cam(cam):
+            ip = cam.get("ip_address")
+            success, lat = execute_network_ping(ip, timeout_sec=0.8)
+            now = datetime.now()
+            if success is None:
+                st = cam.get("status") or "Unknown"
+                lat = float(cam["last_latency_ms"]) if (cam.get("last_latency_ms") is not None and st == "Online") else None
+            else:
+                st = "Online" if success else "Offline"
+            tot = int(cam.get("total_checks") or 0) + 1
+            suc = int(cam.get("successful_checks") or 0) + (1 if st == "Online" else 0)
+            upt = round((suc / tot) * 100, 2)
+            return {
+                "id": cam["id"],
+                "status": st,
+                "latency_ms": lat,
+                "total_checks": tot,
+                "successful_checks": suc,
+                "uptime_percent": upt,
+                "last_check": now
+            }
+
+        results = []
+        if cameras:
+            with ThreadPoolExecutor(max_workers=min(25, len(cameras))) as executor:
+                futures = [executor.submit(_ping_single_cam, c) for c in cameras]
+                for fut in as_completed(futures):
+                    try:
+                        results.append(fut.result())
+                    except Exception:
+                        pass
+
+        if results:
+            db_w = get_db_connection()
+            if db_w:
+                cur_w = db_w.cursor()
+                for r in results:
+                    cur_w.execute("""
+                        UPDATE cameras
+                        SET status = %s, last_latency_ms = %s, last_check = %s, total_checks = %s, successful_checks = %s, uptime_percent = %s, updated_at = %s
+                        WHERE id = %s
+                    """, (r["status"], r["latency_ms"], r["last_check"], r["total_checks"], r["successful_checks"], r["uptime_percent"], r["last_check"], r["id"]))
+                db_w.commit()
+                cur_w.close()
+                db_w.close()
+
+        db_r = get_db_connection()
+        if db_r:
+            cur_r = db_r.cursor(dictionary=True)
+            cur_r.execute("SELECT * FROM cameras ORDER BY id")
+            all_cams = cur_r.fetchall()
+            cur_r.close()
+            db_r.close()
+            return {"success": True, "cameras": all_cams}
+        return {"success": True, "cameras": []}
+    except Exception as err:
+        raise HTTPException(status_code=500, detail=str(err))
+    finally:
+        if cursor:
+            try: cursor.close()
+            except Exception: pass
+        if db:
+            try: db.close()
+            except Exception: pass
+
 
 # ==========================================================
 # CCTV MONITORING SETTINGS
