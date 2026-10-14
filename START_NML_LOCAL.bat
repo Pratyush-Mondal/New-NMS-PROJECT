@@ -7,6 +7,10 @@ cd /d "%~dp0"
 echo ===============================================================
 echo     NEO METALIKS NMS - LOCAL SERVER LAUNCHER
 echo ===============================================================
+echo  Target URL : http://127.0.0.1:8000 (Default Localhost)
+echo  Binding    : 0.0.0.0:8000 (All Network Interfaces)
+echo  Cloud Mode : https://neo-metaliks-nms.onrender.com
+echo ===============================================================
 echo.
 
 if not exist "logs" mkdir "logs"
@@ -30,7 +34,7 @@ if exist "C:\Program Files\Google\Chrome\Application\chrome.exe" set "CHROME_EXE
 if exist "C:\Program Files (x86)\Google\Chrome\Application\chrome.exe" set "CHROME_EXE=C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"
 if exist "%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe" set "CHROME_EXE=%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"
 
-:: 1. Check if local server is already running and responding
+:: 1. Check if local server is already running and responding on http://127.0.0.1:8000
 powershell -NoProfile -ExecutionPolicy Bypass -Command "try { $h = Invoke-RestMethod -Uri 'http://127.0.0.1:8000/api/health' -TimeoutSec 2; if ($h.success) { exit 0 } } catch {}; exit 1"
 if %errorlevel% equ 0 (
     echo [INFO] Neo Metaliks NMS is ALREADY RUNNING and healthy on http://127.0.0.1:8000
@@ -45,7 +49,7 @@ if %errorlevel% equ 0 (
     exit /b 0
 )
 
-:: 2. Detect Python runtime
+:: 2. Detect Python runtime on this PC
 set "PYTHON_EXE="
 if exist "backend\venv\Scripts\python.exe" (
     "backend\venv\Scripts\python.exe" -c "import sys; sys.exit(0)" >nul 2>&1
@@ -69,10 +73,10 @@ if not defined PYTHON_EXE (
 )
 
 :START_SERVER
-set "TARGET_URL="
+set "TARGET_URL=http://127.0.0.1:8000"
 
 if defined PYTHON_EXE (
-    echo [INFO] Starting Neo Metaliks Local NMS Server (0.0.0.0:8000)...
+    echo [INFO] Starting Neo Metaliks Local NMS Server on host 0.0.0.0 port 8000...
     set "PYTHONW_EXE=%PYTHON_EXE:python.exe=pythonw.exe%"
     if not exist "%PYTHONW_EXE%" set "PYTHONW_EXE=%PYTHON_EXE%"
 
@@ -88,23 +92,17 @@ if defined PYTHON_EXE (
         "if ($ready) {" ^
         "    Write-Output 'TARGET=http://127.0.0.1:8000';" ^
         "} else {" ^
-        "    try { $lan = Invoke-RestMethod -Uri 'http://192.168.115.66:8000/api/health' -TimeoutSec 2; if ($lan.success) { Write-Output 'TARGET=http://192.168.115.66:8000'; exit 0 } } catch {};" ^
         "    Write-Output 'TARGET=https://neo-metaliks-nms.onrender.com';" ^
         "}" > "%TEMP%\nms_start_target.txt"
 
     for /f "tokens=2 delims==" %%A in ('type "%TEMP%\nms_start_target.txt"') do set "TARGET_URL=%%A"
     if exist "%TEMP%\nms_start_target.txt" del "%TEMP%\nms_start_target.txt"
 ) else (
-    echo [INFO] Python not found on this machine. Connecting via Network/Cloud...
-    powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-        "try { $lan = Invoke-RestMethod -Uri 'http://192.168.115.66:8000/api/health' -TimeoutSec 2; if ($lan.success) { Write-Output 'TARGET=http://192.168.115.66:8000'; exit 0 } } catch {};" ^
-        "Write-Output 'TARGET=https://neo-metaliks-nms.onrender.com';" > "%TEMP%\nms_start_target.txt"
-
-    for /f "tokens=2 delims==" %%A in ('type "%TEMP%\nms_start_target.txt"') do set "TARGET_URL=%%A"
-    if exist "%TEMP%\nms_start_target.txt" del "%TEMP%\nms_start_target.txt"
+    echo [INFO] Python runtime not installed locally. Connecting via 24/7 Cloud Portal...
+    set "TARGET_URL=https://neo-metaliks-nms.onrender.com"
 )
 
-if not defined TARGET_URL set "TARGET_URL=https://neo-metaliks-nms.onrender.com"
+if not defined TARGET_URL set "TARGET_URL=http://127.0.0.1:8000"
 
 echo.
 echo ===============================================================

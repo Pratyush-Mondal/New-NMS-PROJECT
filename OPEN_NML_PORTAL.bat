@@ -21,7 +21,7 @@ set "TARGET_URL="
 
 echo Checking connection pathways...
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-  "$endpoints = @('http://127.0.0.1:8000', 'http://192.168.115.66:8000', 'https://neo-metaliks-nms.onrender.com');" ^
+  "$endpoints = @('http://127.0.0.1:8000', 'https://neo-metaliks-nms.onrender.com');" ^
   "foreach ($ep in $endpoints) {" ^
   "  try {" ^
   "    $res = Invoke-RestMethod -Uri ($ep + '/api/health') -TimeoutSec 2;" ^

@@ -183,20 +183,14 @@ if defined PYTHON_EXE (
         "if ($ready) {" ^
         "    Write-Output 'TARGET=http://127.0.0.1:8000';" ^
         "} else {" ^
-        "    try { $lan = Invoke-RestMethod -Uri 'http://192.168.115.66:8000/api/health' -TimeoutSec 2; if ($lan.success) { Write-Output 'TARGET=http://192.168.115.66:8000'; exit 0 } } catch {};" ^
         "    Write-Output 'TARGET=https://neo-metaliks-nms.onrender.com';" ^
         "}" > "%TEMP%\nms_launch_target.txt"
 
     for /f "tokens=2 delims==" %%A in ('type "%TEMP%\nms_launch_target.txt"') do set "TARGET_URL=%%A"
     if exist "%TEMP%\nms_launch_target.txt" del "%TEMP%\nms_launch_target.txt"
 ) else (
-    echo [INFO] Checking network and cloud pathways...
-    powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-        "try { $lan = Invoke-RestMethod -Uri 'http://192.168.115.66:8000/api/health' -TimeoutSec 2; if ($lan.success) { Write-Output 'TARGET=http://192.168.115.66:8000'; exit 0 } } catch {};" ^
-        "Write-Output 'TARGET=https://neo-metaliks-nms.onrender.com';" > "%TEMP%\nms_launch_target.txt"
-
-    for /f "tokens=2 delims==" %%A in ('type "%TEMP%\nms_launch_target.txt"') do set "TARGET_URL=%%A"
-    if exist "%TEMP%\nms_launch_target.txt" del "%TEMP%\nms_launch_target.txt"
+    echo [INFO] Python runtime not installed locally. Connecting via 24/7 Cloud Portal...
+    set "TARGET_URL=https://neo-metaliks-nms.onrender.com"
 )
 
 if not defined TARGET_URL set "TARGET_URL=https://neo-metaliks-nms.onrender.com"
