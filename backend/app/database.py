@@ -41,7 +41,7 @@ def _init_pool():
             try:
                 _db_pool = mysql.connector.pooling.MySQLConnectionPool(
                     pool_name="nms_main_pool",
-                    pool_size=32,
+                    pool_size=10,
                     pool_reset_session=True,
                     host=host,
                     port=port,
@@ -57,7 +57,7 @@ def _init_pool():
                 print(f"[DB Pool SSL init fallback]: {e}")
                 _db_pool = mysql.connector.pooling.MySQLConnectionPool(
                     pool_name="nms_main_pool",
-                    pool_size=32,
+                    pool_size=10,
                     pool_reset_session=True,
                     host=host,
                     port=port,

@@ -153,7 +153,7 @@ app.add_middleware(
     allow_headers=["*"]
 )
 
-from app.extra_routes import router as extra_router
+from app.extra_routes import router as extra_router, record_status_change_alert
 app.include_router(extra_router)
 
 # =========================================================
@@ -1994,6 +1994,11 @@ def ping_desktop(
                 desktop_id
             )
         )
+
+        old_status = desktop.get("status")
+        if old_status and old_status != status:
+            record_status_change_alert(None, cursor, "Desktop", desktop["desktop_code"], desktop.get("department", "Desktop"), old_status, status)
+
         db.commit()
 
         return {
@@ -2086,12 +2091,17 @@ def ping_all_desktops_endpoint(credentials: HTTPAuthorizationCredentials = Depen
             db_w = get_db_connection()
             if db_w:
                 cur_w = db_w.cursor()
+                desk_map = {dk["id"]: dk for dk in desktops}
                 for r in results:
                     cur_w.execute("""
                         UPDATE desktops
                         SET status = %s, last_latency_ms = %s, last_check = %s, total_checks = %s, successful_checks = %s, uptime_percent = %s, updated_at = %s
                         WHERE id = %s
                     """, (r["status"], r["latency_ms"], r["last_check"], r["total_checks"], r["successful_checks"], r["uptime_percent"], r["last_check"], r["id"]))
+                    old_dk = desk_map.get(r["id"])
+                    old_st = old_dk.get("status") if old_dk else None
+                    if old_st and old_st != r["status"]:
+                        record_status_change_alert(None, cur_w, "Desktop", old_dk["desktop_code"], old_dk.get("department", "Desktop"), old_st, r["status"])
                 db_w.commit()
                 cur_w.close()
                 db_w.close()
@@ -2520,6 +2530,10 @@ def ping_device(
             )
         )
 
+        old_status = device.get("status")
+        if old_status and old_status != status:
+            record_status_change_alert(None, cursor, "Device", device["device_code"], device["device_name"], old_status, status)
+
         db.commit()
 
         return {
@@ -2612,12 +2626,17 @@ def ping_all_devices_endpoint(admin=Depends(get_current_admin)):
             db_w = get_db_connection()
             if db_w:
                 cur_w = db_w.cursor()
+                dev_map = {d["id"]: d for d in devices}
                 for r in results:
                     cur_w.execute("""
                         UPDATE devices
                         SET status = %s, last_latency_ms = %s, last_check = %s, total_checks = %s, successful_checks = %s, uptime_percent = %s, updated_at = %s
                         WHERE id = %s
                     """, (r["status"], r["latency_ms"], r["last_check"], r["total_checks"], r["successful_checks"], r["uptime_percent"], r["last_check"], r["id"]))
+                    old_d = dev_map.get(r["id"])
+                    old_st = old_d.get("status") if old_d else None
+                    if old_st and old_st != r["status"]:
+                        record_status_change_alert(None, cur_w, "Device", old_d["device_code"], old_d["device_name"], old_st, r["status"])
                 db_w.commit()
                 cur_w.close()
                 db_w.close()
@@ -3029,6 +3048,10 @@ def ping_camera(
             )
         )
 
+        old_status = camera.get("status")
+        if old_status and old_status != status:
+            record_status_change_alert(None, cursor, "Camera", camera["camera_code"], camera["camera_name"], old_status, status)
+
         db.commit()
 
         return {
@@ -3126,12 +3149,17 @@ def ping_all_cameras_endpoint(credentials: HTTPAuthorizationCredentials = Depend
             db_w = get_db_connection()
             if db_w:
                 cur_w = db_w.cursor()
+                cam_map = {c["id"]: c for c in cameras}
                 for r in results:
                     cur_w.execute("""
                         UPDATE cameras
                         SET status = %s, last_latency_ms = %s, last_check = %s, total_checks = %s, successful_checks = %s, uptime_percent = %s, updated_at = %s
                         WHERE id = %s
                     """, (r["status"], r["latency_ms"], r["last_check"], r["total_checks"], r["successful_checks"], r["uptime_percent"], r["last_check"], r["id"]))
+                    old_c = cam_map.get(r["id"])
+                    old_st = old_c.get("status") if old_c else None
+                    if old_st and old_st != r["status"]:
+                        record_status_change_alert(None, cur_w, "Camera", old_c["camera_code"], old_c["camera_name"], old_st, r["status"])
                 db_w.commit()
                 cur_w.close()
                 db_w.close()

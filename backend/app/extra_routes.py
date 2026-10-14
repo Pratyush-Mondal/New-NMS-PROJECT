@@ -17,6 +17,107 @@ def verify_admin(credentials: HTTPAuthorizationCredentials = Depends(security)):
 
 router = APIRouter()
 
+def record_status_change_alert(db, cursor, source_type: str, code: str, name: str, old_status: str, new_status: str):
+    """Records an alert and log whenever an asset transitions between Online and Offline."""
+    if not old_status or old_status == new_status:
+        return None
+    try:
+        now_dt = datetime.now()
+        if new_status == "Offline":
+            sev = "Critical" if source_type == "Device" else "Warning"
+            msg = f"{source_type} {code} ({name}) went Offline"
+            cursor.execute("""
+                INSERT INTO alerts (source_type, source_name, message, severity, status, created_at)
+                VALUES (%s, %s, %s, %s, 'New', %s)
+            """, (source_type, code, msg, sev, now_dt))
+            cursor.execute("""
+                INSERT INTO logs (event_type, source_name, description, created_at)
+                VALUES ('Status Change', %s, %s, %s)
+            """, (code, msg, now_dt))
+        elif new_status == "Online":
+            # Auto-resolve previous 'New' alerts for this asset
+            cursor.execute("""
+                UPDATE alerts SET status = 'Resolved' WHERE source_name = %s AND status = 'New'
+            """, (code,))
+            msg = f"{source_type} {code} ({name}) restored Online"
+            cursor.execute("""
+                INSERT INTO alerts (source_type, source_name, message, severity, status, created_at)
+                VALUES (%s, %s, %s, 'Info', 'New', %s)
+            """, (source_type, code, msg, now_dt))
+            cursor.execute("""
+                INSERT INTO logs (event_type, source_name, description, created_at)
+                VALUES ('Status Change', %s, %s, %s)
+            """, (code, msg, now_dt))
+        if db:
+            db.commit()
+        return msg
+    except Exception as e:
+        print(f"[Alert Record Error]: {e}")
+        return None
+
+
+def sync_offline_alerts(cursor, db):
+    """Ensure every currently offline asset has an active alert in alerts table."""
+    try:
+        # 1. Devices
+        cursor.execute("SELECT device_code, device_name, status FROM devices WHERE status = 'Offline'")
+        for d in cursor.fetchall():
+            cursor.execute("SELECT id FROM alerts WHERE source_name = %s AND status = 'New' LIMIT 1", (d['device_code'],))
+            if not cursor.fetchone():
+                msg = f"Device {d['device_code']} ({d['device_name']}) went Offline"
+                cursor.execute("""
+                    INSERT INTO alerts (source_type, source_name, message, severity, status, created_at)
+                    VALUES ('Device', %s, %s, 'Critical', 'New', NOW())
+                """, (d['device_code'], msg))
+                cursor.execute("""
+                    INSERT INTO logs (event_type, source_name, description, created_at)
+                    VALUES ('Status Change', %s, %s, NOW())
+                """, (d['device_code'], msg))
+
+        # 2. Cameras
+        cursor.execute("SELECT camera_code, camera_name, status FROM cameras WHERE status = 'Offline'")
+        for c in cursor.fetchall():
+            cursor.execute("SELECT id FROM alerts WHERE source_name = %s AND status = 'New' LIMIT 1", (c['camera_code'],))
+            if not cursor.fetchone():
+                msg = f"Camera {c['camera_code']} ({c['camera_name']}) went Offline"
+                cursor.execute("""
+                    INSERT INTO alerts (source_type, source_name, message, severity, status, created_at)
+                    VALUES ('Camera', %s, %s, 'Warning', 'New', NOW())
+                """, (c['camera_code'], msg))
+                cursor.execute("""
+                    INSERT INTO logs (event_type, source_name, description, created_at)
+                    VALUES ('Status Change', %s, %s, NOW())
+                """, (c['camera_code'], msg))
+
+        # 3. Desktops
+        cursor.execute("SELECT desktop_code, department, status FROM desktops WHERE status = 'Offline'")
+        for dk in cursor.fetchall():
+            cursor.execute("SELECT id FROM alerts WHERE source_name = %s AND status = 'New' LIMIT 1", (dk['desktop_code'],))
+            if not cursor.fetchone():
+                msg = f"Desktop {dk['desktop_code']} ({dk['department']}) went Offline"
+                cursor.execute("""
+                    INSERT INTO alerts (source_type, source_name, message, severity, status, created_at)
+                    VALUES ('Desktop', %s, %s, 'Warning', 'New', NOW())
+                """, (dk['desktop_code'], msg))
+                cursor.execute("""
+                    INSERT INTO logs (event_type, source_name, description, created_at)
+                    VALUES ('Status Change', %s, %s, NOW())
+                """, (dk['desktop_code'], msg))
+
+        cursor.execute('''
+            DELETE a1 FROM alerts a1
+            INNER JOIN alerts a2 
+            WHERE a1.id > a2.id 
+              AND a1.source_name = a2.source_name 
+              AND a1.status = 'New' 
+              AND a2.status = 'New'
+        ''')
+        if db:
+            db.commit()
+    except Exception as e:
+        print(f"[Sync Offline Alerts Error]: {e}")
+
+
 @router.get("/api/dashboard/stats")
 def get_dashboard_stats(admin=Depends(verify_admin)):
     db = get_db_connection()
@@ -24,6 +125,7 @@ def get_dashboard_stats(admin=Depends(verify_admin)):
         raise HTTPException(status_code=500, detail="Database connection failed")
     cursor = db.cursor(dictionary=True)
     try:
+        sync_offline_alerts(cursor, db)
         cursor.execute("SELECT COUNT(*) as t, SUM(CASE WHEN status='Online' THEN 1 ELSE 0 END) as o FROM devices")
         dev_stats = cursor.fetchone()
         cursor.execute("SELECT COUNT(*) as t, SUM(CASE WHEN status='Online' THEN 1 ELSE 0 END) as o FROM cameras")
@@ -69,13 +171,17 @@ def get_network_map(admin=Depends(verify_admin)):
         db.close()
 
 @router.get("/api/alerts")
-def get_alerts(admin=Depends(verify_admin)):
+def get_alerts(status: str = None, admin=Depends(verify_admin)):
     db = get_db_connection()
     if not db:
         raise HTTPException(status_code=500)
     cursor = db.cursor(dictionary=True)
     try:
-        cursor.execute("SELECT * FROM alerts WHERE status='New' ORDER BY created_at DESC LIMIT 50")
+        sync_offline_alerts(cursor, db)
+        if status:
+            cursor.execute("SELECT * FROM alerts WHERE status = %s ORDER BY created_at DESC LIMIT 100", (status,))
+        else:
+            cursor.execute("SELECT * FROM alerts ORDER BY CASE WHEN status = 'New' THEN 0 ELSE 1 END, created_at DESC LIMIT 100")
         return {"success": True, "alerts": cursor.fetchall()}
     finally:
         cursor.close()
@@ -191,58 +297,41 @@ last_status = {}
 
 def status_monitor_loop():
     while True:
+        db = None
+        cursor = None
         try:
             db = get_db_connection()
             if db:
                 cursor = db.cursor(dictionary=True)
+                sync_offline_alerts(cursor, db)
                 
-                # Devices
-                cursor.execute('SELECT id, device_code, device_name, status FROM devices')
-                for r in cursor.fetchall():
-                    key = f'dev_{r["id"]}'
-                    old = last_status.get(key)
-                    if old and old != r['status']:
-                        msg = f'Device {r["device_code"]} ({r["device_name"]}) went {r["status"]}'
-                        cursor.execute('INSERT INTO alerts (source_type, source_name, message, severity, status, created_at) VALUES (%s, %s, %s, %s, %s, NOW())', ('Device', r['device_code'], msg, 'Critical' if r['status']=='Offline' else 'Info', 'New'))
-                        cursor.execute("INSERT INTO logs (event_type, source_type, source_name, description, created_at) VALUES ('Status Change', %s, %s, %s, NOW())", ('Device', r['device_code'], msg))
-                        db.commit()
-                        if r['status'] == 'Offline':
-                            print(f'*** EMAIL SENT TO ADMIN: Alert! {r["status"]} - {msg} ***')
-                    last_status[key] = r['status']
-                
-                # Cameras
-                cursor.execute('SELECT id, camera_code, camera_name, status FROM cameras')
-                for r in cursor.fetchall():
-                    key = f'cam_{r["id"]}'
-                    old = last_status.get(key)
-                    if old and old != r['status']:
-                        msg = f'Camera {r["camera_code"]} ({r["camera_name"]}) went {r["status"]}'
-                        cursor.execute('INSERT INTO alerts (source_type, source_name, message, severity, status, created_at) VALUES (%s, %s, %s, %s, %s, NOW())', ('Camera', r['camera_code'], msg, 'Warning' if r['status']=='Offline' else 'Info', 'New'))
-                        cursor.execute("INSERT INTO logs (event_type, source_type, source_name, description, created_at) VALUES ('Status Change', %s, %s, %s, NOW())", ('Camera', r['camera_code'], msg))
-                        db.commit()
-                        if r['status'] == 'Offline':
-                            print(f'*** EMAIL SENT TO ADMIN: Alert! {r["status"]} - {msg} ***')
-                    last_status[key] = r['status']
-                    
-                # Desktops
-                cursor.execute('SELECT id, desktop_code, department, status FROM desktops')
-                for r in cursor.fetchall():
-                    key = f'desk_{r["id"]}'
-                    old = last_status.get(key)
-                    if old and old != r['status']:
-                        msg = f'Desktop {r["desktop_code"]} ({r["department"]}) went {r["status"]}'
-                        cursor.execute('INSERT INTO alerts (source_type, source_name, message, severity, status, created_at) VALUES (%s, %s, %s, %s, %s, NOW())', ('Desktop', r['desktop_code'], msg, 'Warning' if r['status']=='Offline' else 'Info', 'New'))
-                        cursor.execute("INSERT INTO logs (event_type, source_type, source_name, description, created_at) VALUES ('Status Change', %s, %s, %s, NOW())", ('Desktop', r['desktop_code'], msg))
-                        db.commit()
-                        if r['status'] == 'Offline':
-                            print(f'*** EMAIL SENT TO ADMIN: Alert! {r["status"]} - {msg} ***')
-                    last_status[key] = r['status']
-                
-                cursor.close()
-                db.close()
+                # Check transitions across all asset types
+                for tbl, stype, c_col, n_col, pfx in [
+                    ('devices', 'Device', 'device_code', 'device_name', 'dev_'),
+                    ('cameras', 'Camera', 'camera_code', 'camera_name', 'cam_'),
+                    ('desktops', 'Desktop', 'desktop_code', 'department', 'desk_')
+                ]:
+                    cursor.execute(f"SELECT id, {c_col} as code, {n_col} as name, status FROM {tbl}")
+                    for r in cursor.fetchall():
+                        key = f"{pfx}{r['id']}"
+                        old = last_status.get(key)
+                        if old is not None and old != r['status']:
+                            record_status_change_alert(db, cursor, stype, r['code'], r['name'], old, r['status'])
+                        last_status[key] = r['status']
         except Exception as e:
             pass
-        time.sleep(10)
+        finally:
+            if cursor:
+                try:
+                    cursor.close()
+                except Exception:
+                    pass
+            if db:
+                try:
+                    db.close()
+                except Exception:
+                    pass
+        time.sleep(3)
 
 threading.Thread(target=status_monitor_loop, daemon=True).start()
 

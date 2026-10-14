@@ -1772,8 +1772,8 @@ function isSoundNotificationEnabled() {
 }
 
 function playSound(forced = false) {
-    // Only bypass when explicitly testing sound from the Settings page (forced === true)
-    if (forced !== true && !isSoundNotificationEnabled()) {
+    const isForced = forced === true || forced === 'forced' || forced === 'alert';
+    if (!isForced && !isSoundNotificationEnabled()) {
         console.log("🔇 Sound notification is OFF in settings. Audio chime suppressed.");
         return;
     }
@@ -1781,35 +1781,41 @@ function playSound(forced = false) {
     try {
         const ctx = getSharedAudioContext();
         if (ctx) {
+            const playDualTone = () => {
+                try {
+                    const now = ctx.currentTime;
+                    // Dual-tone chime: Tone 1 (Ding 880Hz) -> Tone 2 (Dong 1175Hz)
+                    const osc1 = ctx.createOscillator();
+                    const gain1 = ctx.createGain();
+                    osc1.type = 'sine';
+                    osc1.frequency.setValueAtTime(880, now);
+                    gain1.gain.setValueAtTime(0.40, now);
+                    gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.30);
+                    osc1.connect(gain1);
+                    gain1.connect(ctx.destination);
+                    osc1.start(now);
+                    osc1.stop(now + 0.30);
+
+                    const osc2 = ctx.createOscillator();
+                    const gain2 = ctx.createGain();
+                    osc2.type = 'sine';
+                    osc2.frequency.setValueAtTime(1174.66, now + 0.12);
+                    gain2.gain.setValueAtTime(0.40, now + 0.12);
+                    gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.48);
+                    osc2.connect(gain2);
+                    gain2.connect(ctx.destination);
+                    osc2.start(now + 0.12);
+                    osc2.stop(now + 0.48);
+                } catch (toneErr) {
+                    console.warn("Dual tone generation error:", toneErr);
+                }
+            };
+
             if (ctx.state === 'suspended') {
-                ctx.resume().catch(() => {});
+                ctx.resume().then(playDualTone).catch(playDualTone);
+            } else {
+                playDualTone();
             }
-
-            const now = ctx.currentTime;
-            
-            // Dual-tone chime: Tone 1 (Ding 880Hz) -> Tone 2 (Dong 1175Hz)
-            const osc1 = ctx.createOscillator();
-            const gain1 = ctx.createGain();
-            osc1.type = 'sine';
-            osc1.frequency.setValueAtTime(880, now);
-            gain1.gain.setValueAtTime(0.35, now);
-            gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.28);
-            osc1.connect(gain1);
-            gain1.connect(ctx.destination);
-            osc1.start(now);
-            osc1.stop(now + 0.28);
-
-            const osc2 = ctx.createOscillator();
-            const gain2 = ctx.createGain();
-            osc2.type = 'sine';
-            osc2.frequency.setValueAtTime(1174.66, now + 0.12);
-            gain2.gain.setValueAtTime(0.35, now + 0.12);
-            gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.45);
-            osc2.connect(gain2);
-            gain2.connect(ctx.destination);
-            osc2.start(now + 0.12);
-            osc2.stop(now + 0.45);
-
             return;
         }
     } catch (err) {
@@ -2831,15 +2837,23 @@ async function pingDesktopFromFrontend(desktopId, options = {}) {
             throw new Error(data?.detail || data?.message || "Desktop ping failed");
         }
 
-        const index = desktopData.findIndex(
-            d => Number(d.backendId || d.id) === Number(desktopId)
-        );
-
+        let statusChanged = false;
         if (index >= 0) {
+            const oldStatus = desktopData[index].status;
+            if (oldStatus && oldStatus !== 'Unknown' && oldStatus !== data.status) {
+                statusChanged = true;
+            }
             desktopData[index].status = data.status;
             desktopData[index].last_latency_ms = data.latency_ms;
             desktopData[index].last_check = data.last_check;
             renderDesktopRows(desktopData);
+        }
+
+        if (statusChanged) {
+            playSound(true);
+            if (typeof loadAlerts === 'function') loadAlerts();
+            if (typeof checkGlobalAlertsWithSound === 'function') checkGlobalAlertsWithSound();
+            if (typeof loadDashboardStats === 'function') loadDashboardStats();
         }
 
         if (!options.silent) {
@@ -4212,8 +4226,13 @@ async function pingCameraFromFrontend(cameraId, options = {}) {
             toast(`${isOnline ? "✅" : "❌"} ${data.camera_code || "Camera"} → ${data.status} • ${data.latency_ms ?? "-"} ms`);
         }
 
+        let statusChanged = false;
         const index = backendCameras.findIndex(c => Number(c.id) === Number(cameraId));
         if (index >= 0) {
+            const oldStatus = backendCameras[index].status;
+            if (oldStatus && oldStatus !== 'Unknown' && oldStatus !== data.status) {
+                statusChanged = true;
+            }
             backendCameras[index].status = data.status;
             backendCameras[index].last_latency_ms = data.latency_ms;
             backendCameras[index].total_checks = data.total_checks;
@@ -4226,6 +4245,13 @@ async function pingCameraFromFrontend(cameraId, options = {}) {
             }
         } else if (!options.silent) {
             await loadCamerasFromBackend();
+        }
+
+        if (statusChanged) {
+            playSound(true);
+            if (typeof loadAlerts === 'function') loadAlerts();
+            if (typeof checkGlobalAlertsWithSound === 'function') checkGlobalAlertsWithSound();
+            if (typeof loadDashboardStats === 'function') loadDashboardStats();
         }
 
         return data;
@@ -5861,15 +5887,27 @@ async function pingDeviceFromFrontend(deviceId, options = {}) {
             );
         }
 
+        let statusChanged = false;
         const index = backendDevices.findIndex(
             device => Number(device.id) === Number(deviceId)
         );
 
         if (index >= 0) {
+            const oldStatus = backendDevices[index].status;
+            if (oldStatus && oldStatus !== 'Unknown' && oldStatus !== data.status) {
+                statusChanged = true;
+            }
             backendDevices[index].status = data.status;
             backendDevices[index].last_latency_ms = data.latency_ms;
             backendDevices[index].last_check = data.last_check;
             renderBackendDevices(backendDevices);
+        }
+
+        if (statusChanged) {
+            playSound(true);
+            if (typeof loadAlerts === 'function') loadAlerts();
+            if (typeof checkGlobalAlertsWithSound === 'function') checkGlobalAlertsWithSound();
+            if (typeof loadDashboardStats === 'function') loadDashboardStats();
         }
 
         console.log("Ping Result:", data);
@@ -7161,13 +7199,23 @@ async function loadAlerts() {
     try {
         const token = localStorage.getItem('access_token');
         if (!token) return;
-        const res = await fetch(NMS_API_BASE + '/api/alerts?_t=' + Date.now(), { headers: { 'Authorization': 'Bearer ' + token } });
+        const apiBase = (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL) || (typeof NMS_API_BASE !== 'undefined' ? NMS_API_BASE : '');
+        const res = await fetch(`${apiBase}/api/alerts?_t=${Date.now()}`, { headers: { 'Authorization': 'Bearer ' + token } });
         if (res.ok) {
             const data = await res.json();
-            if (data.success) {
+            if (data.success && Array.isArray(data.alerts)) {
                 let enableAlerts = true;
                 try { const s = JSON.parse(localStorage.getItem('nmsSettings') || '{}'); if(s.alert === false) enableAlerts = false; } catch(e){}
                 if(!enableAlerts) data.alerts = [];
+
+                // Count active 'New' alerts for sidebar and header badges
+                const activeAlerts = data.alerts.filter(a => a.status === 'New');
+                const sbAlerts = document.getElementById('sidebarAlertsCount');
+                const hrAlerts = document.getElementById('headerAlertsCount');
+                const dashAlerts = document.getElementById('dashAlerts');
+                if (sbAlerts) sbAlerts.textContent = activeAlerts.length;
+                if (hrAlerts) hrAlerts.textContent = activeAlerts.length;
+                if (dashAlerts) dashAlerts.textContent = activeAlerts.length;
 
                 const alertList = document.querySelector('.incident-list');
                 if (!alertList) return;
@@ -7179,8 +7227,11 @@ async function loadAlerts() {
                 }
                 
                 data.alerts.forEach(a => {
+                    const isNew = a.status === 'New';
                     const cssBg = a.severity === 'Critical' ? 'critical-bg' : (a.severity === 'Warning' ? 'warning-bg' : 'info-bg');
                     const cssBorder = a.severity === 'Critical' ? 'critical-border' : (a.severity === 'Warning' ? 'warning-border' : 'info-border');
+                    const statusBadgeClass = isNew ? (a.severity === 'Critical' ? 'critical-bg' : 'warning-bg') : (a.status === 'Acknowledged' ? 'warning-bg' : 'info-bg');
+                    const statusLabel = isNew ? '● ACTIVE' : (a.status || 'LOGGED').toUpperCase();
                     const createdDate = new Date(a.created_at);
                     
                     // Format relative time
@@ -7206,16 +7257,16 @@ async function loadAlerts() {
                     }
 
                     // Find location from frontend state
-                    let loc = "Unknown Location";
+                    let loc = "Plant Infrastructure";
                     if (typeof backendDevices !== 'undefined') {
                         const dev = backendDevices.find(d => d.device_code === a.source_name);
                         if (dev && dev.location) loc = dev.location;
                     }
-                    if (loc === "Unknown Location" && typeof backendCameras !== 'undefined') {
+                    if (loc === "Plant Infrastructure" && typeof backendCameras !== 'undefined') {
                         const cam = backendCameras.find(c => c.camera_code === a.source_name);
                         if (cam && cam.location) loc = cam.location;
                     }
-                    if (loc === "Unknown Location" && typeof desktopData !== 'undefined') {
+                    if (loc === "Plant Infrastructure" && typeof desktopData !== 'undefined') {
                         const desk = desktopData.find(d => d.id === a.source_name);
                         if (desk && desk.location) loc = desk.location;
                     }
@@ -7225,10 +7276,10 @@ async function loadAlerts() {
 
                     let cleanMsg = a.message;
                     
-                    alertList.innerHTML += '<div class="incident ' + cssBorder + '">' +
+                    alertList.innerHTML += '<div class="incident ' + cssBorder + '" style="' + (isNew ? 'box-shadow: 0 0 12px rgba(239,68,68,0.18); border-left-width: 4px;' : 'opacity:0.85;') + '">' +
                         '<div class="severity ' + cssBg + '">' + a.severity.toUpperCase() + '</div>' +
-                        '<div><h3 style="margin-bottom:5px;">' + cleanMsg + '</h3><p style="font-size:12px; color:#a2b5cd;">' + detailsStr + '</p></div>' +
-                        '<div class="severity info-bg">' + a.status + '</div>' +
+                        '<div style="flex:1;"><h3 style="margin-bottom:5px;">' + cleanMsg + '</h3><p style="font-size:12px; color:#a2b5cd;">' + detailsStr + '</p></div>' +
+                        '<div class="severity ' + statusBadgeClass + '" style="font-weight:700;">' + statusLabel + '</div>' +
                         '</div>';
                 });
             }
@@ -7239,11 +7290,13 @@ async function loadAlerts() {
 window.ackAlerts = async function () {
     try {
         const token = localStorage.getItem('access_token');
-        const res = await fetch(NMS_API_BASE + '/api/alerts/acknowledge', { method: 'PUT', headers: { 'Authorization': 'Bearer ' + token } });
+        const apiBase = (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL) || (typeof NMS_API_BASE !== 'undefined' ? NMS_API_BASE : '');
+        const res = await fetch(`${apiBase}/api/alerts/acknowledge`, { method: 'PUT', headers: { 'Authorization': 'Bearer ' + token } });
         if (res.ok) {
-            toast('All alerts acknowledged');
-            loadAlerts();
-            loadDashboardStats();
+            toast('✓ All alerts acknowledged');
+            await loadAlerts();
+            if (typeof loadDashboardStats === 'function') loadDashboardStats();
+            if (typeof checkGlobalAlertsWithSound === 'function') checkGlobalAlertsWithSound();
         }
     } catch (err) { }
 };
@@ -7355,10 +7408,17 @@ async function triggerAutoPingAllDevices(isManual = false) {
         });
         const data = await res.json().catch(() => ({}));
         if (res.ok && data.success && Array.isArray(data.devices)) {
-            const prevOfflineCount = (window.backendDevices || []).filter(d => d.status === 'Offline').length;
-            const newOfflineCount = data.devices.filter(d => d.status === 'Offline').length;
-            if (newOfflineCount > prevOfflineCount && typeof playSound === 'function') {
-                playSound('alert');
+            const prevStatusMap = new Map((window.backendDevices || []).map(d => [d.device_code || d.id, d.status]));
+            let transitionOccurred = false;
+
+            for (const d of data.devices) {
+                const key = d.device_code || d.id;
+                const oldSt = prevStatusMap.get(key);
+                if (oldSt && oldSt !== 'Unknown' && oldSt !== d.status) {
+                    transitionOccurred = true;
+                    const icon = d.status === 'Online' ? '✅' : '🚨';
+                    toast(`${icon} Device ${d.device_code} (${d.device_name || 'Switch'}) is now ${d.status}`);
+                }
             }
 
             window.backendDevices = data.devices;
@@ -7367,6 +7427,12 @@ async function triggerAutoPingAllDevices(isManual = false) {
             }
             if (typeof loadDashboardStats === 'function') {
                 loadDashboardStats();
+            }
+
+            if (transitionOccurred) {
+                playSound(true);
+                if (typeof loadAlerts === 'function') loadAlerts();
+                if (typeof checkGlobalAlertsWithSound === 'function') checkGlobalAlertsWithSound();
             }
 
             const nowTime = new Date().toLocaleTimeString();
@@ -7411,10 +7477,17 @@ async function triggerAutoPingAllCameras(isManual = false) {
         });
         const data = await res.json().catch(() => ({}));
         if (res.ok && data.success && Array.isArray(data.cameras)) {
-            const prevOfflineCount = (window.backendCameras || []).filter(c => c.status === 'Offline').length;
-            const newOfflineCount = data.cameras.filter(c => c.status === 'Offline').length;
-            if (newOfflineCount > prevOfflineCount && typeof playSound === 'function') {
-                playSound('alert');
+            const prevStatusMap = new Map((window.backendCameras || []).map(c => [c.camera_code || c.id, c.status]));
+            let transitionOccurred = false;
+
+            for (const c of data.cameras) {
+                const key = c.camera_code || c.id;
+                const oldSt = prevStatusMap.get(key);
+                if (oldSt && oldSt !== 'Unknown' && oldSt !== c.status) {
+                    transitionOccurred = true;
+                    const icon = c.status === 'Online' ? '✅' : '🚨';
+                    toast(`${icon} CCTV ${c.camera_code} (${c.location || c.camera_name || 'Camera'}) is now ${c.status}`);
+                }
             }
 
             window.backendCameras = data.cameras;
@@ -7423,6 +7496,15 @@ async function triggerAutoPingAllCameras(isManual = false) {
             }
             if (typeof updateCameraDashboardStats === 'function') {
                 updateCameraDashboardStats(window.backendCameras);
+            }
+            if (typeof loadDashboardStats === 'function') {
+                loadDashboardStats();
+            }
+
+            if (transitionOccurred) {
+                playSound(true);
+                if (typeof loadAlerts === 'function') loadAlerts();
+                if (typeof checkGlobalAlertsWithSound === 'function') checkGlobalAlertsWithSound();
             }
 
             const nowTime = new Date().toLocaleTimeString();
@@ -7467,10 +7549,23 @@ async function triggerAutoPingAllDesktops(isManual = false) {
         });
         const data = await res.json().catch(() => ({}));
         if (res.ok && data.success && Array.isArray(data.desktops)) {
-            const prevOfflineCount = (window.desktopData || []).filter(d => d.status === 'Offline').length;
-            const newOfflineCount = data.desktops.filter(d => d.status === 'Offline').length;
-            if (newOfflineCount > prevOfflineCount && isSoundNotificationEnabled() && typeof playSound === 'function') {
+            const prevStatusMap = new Map((window.desktopData || []).map(d => [d.id || d.backendId, d.status]));
+            let transitionOccurred = false;
+
+            for (const d of data.desktops) {
+                const key = d.desktop_code || d.id;
+                const oldSt = prevStatusMap.get(key) || prevStatusMap.get(Number(d.id));
+                if (oldSt && oldSt !== 'Unknown' && oldSt !== d.status) {
+                    transitionOccurred = true;
+                    const icon = d.status === 'Online' ? '✅' : '🚨';
+                    toast(`${icon} Desktop ${d.desktop_code} (${d.department || 'Workstation'}) is now ${d.status}`);
+                }
+            }
+
+            if (transitionOccurred) {
                 playSound(true);
+                if (typeof loadAlerts === 'function') loadAlerts();
+                if (typeof checkGlobalAlertsWithSound === 'function') checkGlobalAlertsWithSound();
             }
 
             window.desktopData = data.desktops.map(desktop => ({
@@ -7589,15 +7684,22 @@ async function checkGlobalAlertsWithSound() {
         if (!data.success || !Array.isArray(data.alerts)) return;
 
         const currentAlerts = data.alerts;
+        const activeAlerts = currentAlerts.filter(a => a.status === 'New');
+        const activeCount = activeAlerts.length;
+
+        // Synchronize sidebar, header, and dashboard badge counters with active New alerts
+        const sbAlerts = document.getElementById('sidebarAlertsCount');
+        const hrAlerts = document.getElementById('headerAlertsCount');
+        const dashAlerts = document.getElementById('dashAlerts');
+        if (sbAlerts) sbAlerts.textContent = activeCount;
+        if (hrAlerts) hrAlerts.textContent = activeCount;
+        if (dashAlerts) dashAlerts.textContent = activeCount;
+
         const currentIds = new Set(currentAlerts.map(a => Number(a.id)));
 
         // Initial check on load: capture existing IDs without chime
         if (_seenAlertIds === null) {
             _seenAlertIds = currentIds;
-            const sbAlerts = document.getElementById('sidebarAlertsCount');
-            const hrAlerts = document.getElementById('headerAlertsCount');
-            if (sbAlerts) sbAlerts.textContent = currentAlerts.length;
-            if (hrAlerts) hrAlerts.textContent = currentAlerts.length;
             return;
         }
 
@@ -7615,28 +7717,20 @@ async function checkGlobalAlertsWithSound() {
 
         if (hasNew && newest) {
             console.log("🚨 New alert detected:", newest);
-            if (isSoundNotificationEnabled()) {
-                console.log("🔊 Playing alert chime (sound notification enabled in Settings)...");
-                playSound(true);
-            }
+            playSound(true);
             if (typeof toast === 'function') {
-                const icon = newest.severity === 'Critical' ? '🚨' : (newest.severity === 'Warning' ? '⚠️' : 'ℹ️');
+                const icon = newest.severity === 'Critical' ? '🚨' : (newest.severity === 'Warning' ? '⚠️' : (newest.severity === 'Info' ? '✅' : 'ℹ️'));
                 toast(`${icon} ${newest.message}`);
             }
 
-            // If user is currently on Alerts page, re-render immediately
-            const activePage = window.currentPage || document.querySelector('.page.active')?.id || '';
-            if (activePage === 'alerts' && typeof loadAlerts === 'function') {
+            // Always update alerts page if open
+            if (typeof loadAlerts === 'function') {
                 loadAlerts();
             }
+            if (typeof loadDashboardStats === 'function') {
+                loadDashboardStats();
+            }
         }
-
-        // Always sync sidebar & header badge counters
-        const sbAlerts = document.getElementById('sidebarAlertsCount');
-        const hrAlerts = document.getElementById('headerAlertsCount');
-        if (sbAlerts) sbAlerts.textContent = currentAlerts.length;
-        if (hrAlerts) hrAlerts.textContent = currentAlerts.length;
-
     } catch (err) {
         console.warn("Global alert checking error:", err);
     }
