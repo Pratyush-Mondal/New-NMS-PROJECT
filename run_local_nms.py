@@ -74,6 +74,27 @@ class DualLogger:
         except Exception:
             pass
 
+    def isatty(self):
+        try:
+            if self.stream and hasattr(self.stream, "isatty"):
+                return bool(self.stream.isatty())
+        except Exception:
+            pass
+        return False
+
+    def fileno(self):
+        try:
+            if self.stream and hasattr(self.stream, "fileno"):
+                return self.stream.fileno()
+        except Exception:
+            pass
+        raise OSError("fileno not supported")
+
+    def __getattr__(self, name):
+        if self.stream and hasattr(self.stream, name):
+            return getattr(self.stream, name)
+        raise AttributeError(f"'DualLogger' object has no attribute '{name}'")
+
 def main():
     ensure_env_file()
     if not acquire_instance_lock() or check_port_in_use(8000):

@@ -8,7 +8,8 @@ echo ===============================================================
 echo     NEO METALIKS NMS - ONE-TIME LOCAL SETUP WIZARD
 echo ===============================================================
 echo  Target Mode : Localhost (http://127.0.0.1:8000)
-echo  Binding     : 0.0.0.0:8000 (Local Machine / LAN)
+echo  LAN Mode    : Any Desktop (0.0.0.0:8000)
+echo  Cloud Mode  : Render (https://neo-metaliks-nms.onrender.com)
 echo ===============================================================
 echo.
 
@@ -166,34 +167,50 @@ if exist "%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe" set "CHROME_EXE=%
 set "TARGET_URL=http://127.0.0.1:8000"
 
 if defined PYTHON_EXE (
+    set "PYTHONW_EXE=%PYTHON_EXE:python.exe=pythonw.exe%"
+    if not exist "%PYTHONW_EXE%" set "PYTHONW_EXE=%PYTHON_EXE%"
+
     powershell -NoProfile -ExecutionPolicy Bypass -Command ^
         "$ready = $false;" ^
         "try { $h = Invoke-RestMethod -Uri 'http://127.0.0.1:8000/api/health' -TimeoutSec 2; if ($h.success) { $ready = $true } } catch {};" ^
         "if (-not $ready) {" ^
-        "    Start-Process -FilePath '%PYTHON_EXE%' -ArgumentList 'run_local_nms.py' -WorkingDirectory '%~dp0' -WindowStyle Minimized;" ^
-        "    for ($i=1; $i -le 25; $i++) {" ^
+        "    Start-Process -FilePath '%PYTHONW_EXE%' -ArgumentList 'run_local_nms.py' -WorkingDirectory '%~dp0';" ^
+        "    for ($i=1; $i -le 15; $i++) {" ^
         "        Start-Sleep -Seconds 1;" ^
         "        try { $res = Invoke-RestMethod -Uri 'http://127.0.0.1:8000/api/health' -TimeoutSec 2; if ($res.success) { $ready = $true; break } } catch { Write-Host ('.') -NoNewline }" ^
         "    }" ^
         "};" ^
-        "if ($ready) { Write-Host ' [READY]' } else { Write-Host ' [STARTING]' }"
+        "if ($ready) {" ^
+        "    Write-Output 'TARGET=http://127.0.0.1:8000';" ^
+        "} else {" ^
+        "    Write-Output 'TARGET=https://neo-metaliks-nms.onrender.com';" ^
+        "}" > "%TEMP%\nms_launch_target.txt"
+
+    for /f "tokens=2 delims==" %%A in ('type "%TEMP%\nms_launch_target.txt"') do set "TARGET_URL=%%A"
+    if exist "%TEMP%\nms_launch_target.txt" del "%TEMP%\nms_launch_target.txt"
+) else (
+    echo [INFO] Python runtime not installed locally. Connecting via 24/7 Cloud Portal...
+    set "TARGET_URL=https://neo-metaliks-nms.onrender.com"
 )
+
+if not defined TARGET_URL set "TARGET_URL=https://neo-metaliks-nms.onrender.com"
 
 echo.
 echo ===============================================================
-echo  [SUCCESS] NEO METALIKS NMS LOCAL SERVER READY!
+echo  [SUCCESS] NEO METALIKS NMS CONNECTED SUCCESSFULLY!
 echo ===============================================================
-echo  - Localhost URL   : http://127.0.0.1:8000
-echo  - Single Instance : Protected (host=0.0.0.0 port=8000)
+echo  - Active Portal URL : %TARGET_URL%
+echo  - Cloud Backup URL  : https://neo-metaliks-nms.onrender.com
+echo  - Single Instance   : Protected (host=0.0.0.0 port=8000)
 echo ===============================================================
 echo.
 
 if defined CHROME_EXE (
-    echo [INFO] Opening Localhost dashboard directly in Google Chrome...
-    start "" "%CHROME_EXE%" "http://127.0.0.1:8000"
+    echo [INFO] Opening dashboard directly in Google Chrome...
+    start "" "%CHROME_EXE%" "%TARGET_URL%"
 ) else (
-    echo [INFO] Opening Localhost dashboard in default web browser...
-    start http://127.0.0.1:8000
+    echo [INFO] Opening dashboard in default web browser...
+    start %TARGET_URL%
 )
 
 ping 127.0.0.1 -n 3 >nul
