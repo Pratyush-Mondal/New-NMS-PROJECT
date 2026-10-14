@@ -1568,9 +1568,9 @@ def get_desktop_monitoring_settings(
                 "selected_location": None
             }
 
-        cursor.execute("SELECT COALESCE(MIN(monitoring_interval), 30) AS interval FROM desktops")
+        cursor.execute("SELECT COALESCE(MIN(monitoring_interval), 30) AS desk_interval FROM desktops")
         int_row = cursor.fetchone()
-        desk_interval = int(int_row["interval"] or 30) if int_row else 30
+        desk_interval = int(int_row["desk_interval"] or 30) if int_row else 30
 
         return {
             "success": True,
