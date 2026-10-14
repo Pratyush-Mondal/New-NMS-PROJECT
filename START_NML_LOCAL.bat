@@ -1,21 +1,21 @@
 @echo off
 setlocal enabledelayedexpansion
-title NEO METALIKS NMS - START LOCAL SERVER
+title NEO METALIKS NMS - START LOCAL SERVER (LOCALHOST ONLY)
 color 0a
 cd /d "%~dp0"
 
 echo ===============================================================
-echo     NEO METALIKS NMS - LOCAL SERVER LAUNCHER
+echo     NEO METALIKS NMS - PURE LOCAL SERVER LAUNCHER
 echo ===============================================================
-echo  Target URL : http://127.0.0.1:8000 (Default Localhost)
-echo  Binding    : 0.0.0.0:8000 (All Network Interfaces)
-echo  Cloud Mode : https://neo-metaliks-nms.onrender.com
+echo  Target URL : http://127.0.0.1:8000 (Strict Localhost)
+echo  Binding    : 0.0.0.0:8000 (Local Network / Local PC)
+echo  Cloud Mode : DISABLED (Pure Localhost Operation)
 echo ===============================================================
 echo.
 
 if not exist "logs" mkdir "logs"
 
-:: Ensure backend\.env exists with cloud credentials
+:: Ensure backend\.env exists with database credentials
 if not exist "backend\.env" (
     (
         echo DATABASE_URL=mysql://2v9Ac8dmNnbuaJg.root:3K1EV2DPGMMw6yEb@gateway01.ap-southeast-1.prod.aws.tidbcloud.com:4000/test
@@ -37,12 +37,12 @@ if exist "%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe" set "CHROME_EXE=%
 :: 1. Check if local server is already running and responding on http://127.0.0.1:8000
 powershell -NoProfile -ExecutionPolicy Bypass -Command "try { $h = Invoke-RestMethod -Uri 'http://127.0.0.1:8000/api/health' -TimeoutSec 2; if ($h.success) { exit 0 } } catch {}; exit 1"
 if %errorlevel% equ 0 (
-    echo [INFO] Neo Metaliks NMS is ALREADY RUNNING and healthy on http://127.0.0.1:8000
+    echo [INFO] Neo Metaliks NMS is ALREADY RUNNING locally on http://127.0.0.1:8000
     if defined CHROME_EXE (
-        echo [INFO] Opening dashboard directly in Google Chrome...
+        echo [INFO] Opening Localhost dashboard directly in Google Chrome...
         start "" "%CHROME_EXE%" "http://127.0.0.1:8000"
     ) else (
-        echo [INFO] Opening dashboard in default web browser...
+        echo [INFO] Opening Localhost dashboard in default web browser...
         start http://127.0.0.1:8000
     )
     ping 127.0.0.1 -n 3 >nul
@@ -67,55 +67,63 @@ if not defined PYTHON_EXE (
     for /d %%D in ("%LOCALAPPDATA%\Programs\Python\Python3*" "C:\Program Files\Python3*" "C:\Program Files (x86)\Python3*" "C:\Python3*") do (
         if exist "%%~D\python.exe" (
             set "PYTHON_EXE=%%~D\python.exe"
-            goto :START_SERVER
+            goto :CHECK_DEPS
         )
     )
 )
 
-:START_SERVER
-set "TARGET_URL=http://127.0.0.1:8000"
-
-if defined PYTHON_EXE (
-    echo [INFO] Starting Neo Metaliks Local NMS Server on host 0.0.0.0 port 8000...
-    set "PYTHONW_EXE=%PYTHON_EXE:python.exe=pythonw.exe%"
-    if not exist "%PYTHONW_EXE%" set "PYTHONW_EXE=%PYTHON_EXE%"
-
-    start "" "%PYTHONW_EXE%" run_local_nms.py
-
-    echo Waiting for server to initialize...
-    powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-        "$ready = $false;" ^
-        "for ($i=1; $i -le 15; $i++) {" ^
-        "    Start-Sleep -Seconds 1;" ^
-        "    try { $res = Invoke-RestMethod -Uri 'http://127.0.0.1:8000/api/health' -TimeoutSec 2; if ($res.success) { $ready = $true; break } } catch { Write-Host ('.') -NoNewline };" ^
-        "};" ^
-        "if ($ready) {" ^
-        "    Write-Output 'TARGET=http://127.0.0.1:8000';" ^
-        "} else {" ^
-        "    Write-Output 'TARGET=https://neo-metaliks-nms.onrender.com';" ^
-        "}" > "%TEMP%\nms_start_target.txt"
-
-    for /f "tokens=2 delims==" %%A in ('type "%TEMP%\nms_start_target.txt"') do set "TARGET_URL=%%A"
-    if exist "%TEMP%\nms_start_target.txt" del "%TEMP%\nms_start_target.txt"
-) else (
-    echo [INFO] Python runtime not installed locally. Connecting via 24/7 Cloud Portal...
-    set "TARGET_URL=https://neo-metaliks-nms.onrender.com"
+:CHECK_DEPS
+if not defined PYTHON_EXE (
+    echo [ERROR] Python is not found on this computer.
+    echo Please install Python 3.10+ from python.org and add to PATH.
+    pause
+    exit /b 1
 )
 
-if not defined TARGET_URL set "TARGET_URL=http://127.0.0.1:8000"
+:: 3. Verify and auto-install Python dependencies if missing
+echo [INFO] Verifying required Python packages for Localhost...
+"%PYTHON_EXE%" -c "import fastapi, uvicorn, mysql.connector, jwt, dotenv" >nul 2>&1
+if %errorlevel% neq 0 (
+    echo [INFO] Missing required packages. Auto-installing dependencies now...
+    if exist "backend\requirements.txt" (
+        "%PYTHON_EXE%" -m pip install -r backend\requirements.txt
+    ) else (
+        "%PYTHON_EXE%" -m pip install fastapi "uvicorn[standard]" mysql-connector-python PyJWT python-dotenv python-multipart openpyxl
+    )
+    if %errorlevel% neq 0 (
+        echo [WARNING] Dependency installation failed. Attempting direct fallback install...
+        "%PYTHON_EXE%" -m pip install fastapi uvicorn mysql-connector-python PyJWT python-dotenv python-multipart openpyxl
+    )
+)
+echo [OK] Python dependencies verified.
+
+:: 4. Start local FastAPI/Uvicorn server
+echo [INFO] Starting Neo Metaliks Local NMS Server on http://127.0.0.1:8000...
+start "Neo Metaliks Local NMS Server" /min "%PYTHON_EXE%" run_local_nms.py
+
+echo Waiting for local server to initialize on http://127.0.0.1:8000...
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+    "$ready = $false;" ^
+    "for ($i=1; $i -le 25; $i++) {" ^
+    "    Start-Sleep -Seconds 1;" ^
+    "    try { $res = Invoke-RestMethod -Uri 'http://127.0.0.1:8000/api/health' -TimeoutSec 2; if ($res.success) { $ready = $true; break } } catch { Write-Host ('.') -NoNewline };" ^
+    "};" ^
+    "if ($ready) { Write-Host ' [READY]' } else { Write-Host ' [STARTING]' }"
+
+set "TARGET_URL=http://127.0.0.1:8000"
 
 echo.
 echo ===============================================================
-echo  Active NMS URL   : %TARGET_URL%
-echo  Render Cloud URL : https://neo-metaliks-nms.onrender.com
+echo  Local NMS URL : %TARGET_URL%
+echo  Status        : Running on Localhost (127.0.0.1:8000)
 echo ===============================================================
 echo.
 
 if defined CHROME_EXE (
-    echo [INFO] Opening dashboard directly in Google Chrome...
+    echo [INFO] Opening Localhost dashboard directly in Google Chrome...
     start "" "%CHROME_EXE%" "%TARGET_URL%"
 ) else (
-    echo [INFO] Opening dashboard in default web browser...
+    echo [INFO] Opening Localhost dashboard in default web browser...
     start %TARGET_URL%
 )
 

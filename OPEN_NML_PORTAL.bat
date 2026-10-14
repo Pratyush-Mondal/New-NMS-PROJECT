@@ -1,13 +1,13 @@
 @echo off
 setlocal enabledelayedexpansion
-title NEO METALIKS NMS - ONE-CLICK PORTAL
+title NEO METALIKS NMS - ONE-CLICK LOCAL PORTAL
 color 0b
 cd /d "%~dp0"
 
 echo ===============================================================
-echo     NEO METALIKS NMS - ONE-CLICK PORTAL LAUNCHER
+echo     NEO METALIKS NMS - ONE-CLICK LOCAL PORTAL
 echo ===============================================================
-echo  Automatically connecting to the best available pathway...
+echo  Target URL : http://127.0.0.1:8000 (Localhost Only)
 echo ===============================================================
 echo.
 
@@ -17,36 +17,23 @@ if exist "C:\Program Files\Google\Chrome\Application\chrome.exe" set "CHROME_EXE
 if exist "C:\Program Files (x86)\Google\Chrome\Application\chrome.exe" set "CHROME_EXE=C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"
 if exist "%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe" set "CHROME_EXE=%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"
 
-set "TARGET_URL="
+:: Check if localhost is responding
+powershell -NoProfile -ExecutionPolicy Bypass -Command "try { $res = Invoke-RestMethod -Uri 'http://127.0.0.1:8000/api/health' -TimeoutSec 2; if ($res.success) { exit 0 } } catch {}; exit 1"
+if %errorlevel% neq 0 (
+    echo [INFO] Local server is not currently running. Starting it now...
+    call START_NML_LOCAL.bat
+    exit /b 0
+)
 
-echo Checking connection pathways...
-powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-  "$endpoints = @('http://127.0.0.1:8000', 'https://neo-metaliks-nms.onrender.com');" ^
-  "foreach ($ep in $endpoints) {" ^
-  "  try {" ^
-  "    $res = Invoke-RestMethod -Uri ($ep + '/api/health') -TimeoutSec 2;" ^
-  "    if ($res.success) {" ^
-  "      Write-Output ('TARGET=' + $ep);" ^
-  "      exit 0;" ^
-  "    }" ^
-  "  } catch {}" ^
-  "};" ^
-  "Write-Output 'TARGET=https://neo-metaliks-nms.onrender.com';" > "%TEMP%\nms_target.txt"
-
-for /f "tokens=2 delims==" %%A in ('type "%TEMP%\nms_target.txt"') do set "TARGET_URL=%%A"
-if exist "%TEMP%\nms_target.txt" del "%TEMP%\nms_target.txt"
-
-if not defined TARGET_URL set "TARGET_URL=https://neo-metaliks-nms.onrender.com"
-
-echo [SUCCESS] Connecting to NMS Portal at: %TARGET_URL%
+echo [SUCCESS] Connecting to NMS Localhost Portal at: http://127.0.0.1:8000
 echo.
 
 if defined CHROME_EXE (
     echo Opening dashboard directly in Google Chrome...
-    start "" "%CHROME_EXE%" "%TARGET_URL%"
+    start "" "%CHROME_EXE%" "http://127.0.0.1:8000"
 ) else (
     echo Opening dashboard in default web browser...
-    start %TARGET_URL%
+    start http://127.0.0.1:8000
 )
 
 ping 127.0.0.1 -n 3 >nul

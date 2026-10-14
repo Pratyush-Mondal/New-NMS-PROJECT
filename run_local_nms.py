@@ -45,17 +45,46 @@ def ensure_env_file():
         except Exception:
             pass
 
+class DualLogger:
+    def __init__(self, filepath, stream):
+        self.stream = stream
+        self.file = open(filepath, "a", encoding="utf-8", buffering=1)
+
+    def write(self, data):
+        try:
+            if self.stream:
+                self.stream.write(data)
+                self.stream.flush()
+        except Exception:
+            pass
+        try:
+            self.file.write(data)
+            self.file.flush()
+        except Exception:
+            pass
+
+    def flush(self):
+        try:
+            if self.stream:
+                self.stream.flush()
+        except Exception:
+            pass
+        try:
+            self.file.flush()
+        except Exception:
+            pass
+
 def main():
     ensure_env_file()
     if not acquire_instance_lock() or check_port_in_use(8000):
         with open(LOG_FILE, "a", encoding="utf-8") as f:
             f.write(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [INFO] Instance already active or port 8000 in use. Exiting duplicate process cleanly.\n")
+        print("[INFO] Neo Metaliks NMS is already running on http://127.0.0.1:8000")
         sys.exit(0)
 
-    # Setup file logging
-    log_fp = open(LOG_FILE, "a", encoding="utf-8", buffering=1)
-    sys.stdout = log_fp
-    sys.stderr = log_fp
+    # Setup file + console logging
+    sys.stdout = DualLogger(LOG_FILE, sys.stdout)
+    sys.stderr = DualLogger(LOG_FILE, sys.stderr)
 
     now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     print(f"\n=======================================================")
