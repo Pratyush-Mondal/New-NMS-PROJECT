@@ -2901,6 +2901,57 @@ class CameraMonitoringSettingsRequest(BaseModel):
     camera_interval: int
     camera_retry_interval: int
 
+@app.get("/api/settings/camera")
+def get_camera_monitoring_settings(
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    token = credentials.credentials
+    admin = get_admin_from_token(token)
+    if admin is None:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or expired token."
+        )
+
+    db = get_db_connection()
+    if db is None:
+        raise HTTPException(
+            status_code=500,
+            detail="Database connection failed."
+        )
+
+    cursor = None
+    try:
+        cursor = db.cursor(dictionary=True)
+        cursor.execute(
+            """
+            SELECT
+                COUNT(*) AS total_cameras,
+                SUM(CASE WHEN monitoring_enabled = 1 THEN 1 ELSE 0 END) AS enabled_cameras,
+                COALESCE(MIN(monitoring_interval), 30) AS camera_interval,
+                COALESCE(MIN(offline_retry_interval), 120) AS camera_retry_interval
+            FROM cameras
+            """
+        )
+        row = cursor.fetchone() or {}
+        enabled_cams = int(row.get("enabled_cameras") or 0)
+        return {
+            "success": True,
+            "camera_monitoring": enabled_cams > 0,
+            "camera_interval": int(row.get("camera_interval") or 30),
+            "camera_retry_interval": int(row.get("camera_retry_interval") or 120)
+        }
+    except Exception as error:
+        raise HTTPException(
+            status_code=500,
+            detail=str(error)
+        )
+    finally:
+        if cursor:
+            cursor.close()
+        if db:
+            db.close()
+
 @app.put("/api/settings/camera")
 def update_camera_monitoring_settings(
     data: CameraMonitoringSettingsRequest,

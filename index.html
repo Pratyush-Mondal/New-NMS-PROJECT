@@ -1715,13 +1715,16 @@
             <label>Network Check Interval</label>
 
             <select id="networkInterval">
-
                 <option value="5">5 Seconds</option>
                 <option value="10">10 Seconds</option>
                 <option value="30">30 Seconds</option>
                 <option value="60">1 Minute</option>
+                <option value="120">2 Minutes</option>
                 <option value="300">5 Minutes</option>
-                
+                <option value="600">10 Minutes</option>
+                <option value="900">15 Minutes</option>
+                <option value="1800">30 Minutes</option>
+                <option value="3600">1 Hour</option>
             </select>
 
         </div>
@@ -1758,13 +1761,34 @@
             <label>Camera Check Interval</label>
 
             <select id="cameraInterval">
-
                 <option value="5">5 Seconds</option>
                 <option value="10">10 Seconds</option>
                 <option value="30">30 Seconds</option>
                 <option value="60">1 Minute</option>
+                <option value="120">2 Minutes</option>
                 <option value="300">5 Minutes</option>
-<option value="1800">30 Minutes</option>
+                <option value="600">10 Minutes</option>
+                <option value="900">15 Minutes</option>
+                <option value="1800">30 Minutes</option>
+                <option value="3600">1 Hour</option>
+            </select>
+
+        </div>
+
+        <div class="setting-item" style="margin-top:15px;">
+
+            <label>Offline Camera Retry Interval</label>
+
+            <select id="cameraRetryInterval">
+                <option value="10">10 Seconds</option>
+                <option value="30">30 Seconds</option>
+                <option value="60">1 Minute</option>
+                <option value="120">2 Minutes</option>
+                <option value="300">5 Minutes</option>
+                <option value="600">10 Minutes</option>
+                <option value="900">15 Minutes</option>
+                <option value="1800">30 Minutes</option>
+                <option value="3600">1 Hour</option>
             </select>
 
         </div>
@@ -1772,34 +1796,16 @@
     </div>
 
 
-    <div class="setting-item">
-
-    <label>Offline Camera Retry Interval</label>
-
-    <select id="cameraRetryInterval">
-
-        <option value="30">30 Seconds</option>
-        <option value="60">1 Minute</option>
-        <option value="120" selected>2 Minutes</option>
-        <option value="300">5 Minutes</option>
-        <option value="600">10 Minutes</option>
-
-    </select>
-
-</div>
-
-
     <!-- ALERT SETTINGS -->
     <div class="settings-card">
 
         <h2>🚨 Alert & Recovery</h2>
 
-
         <div class="setting-row">
 
             <div>
-                <strong>Alert</strong>
-                <p>Enable system alerts</p>
+                <strong>Alert System</strong>
+                <p>Enable system alerts and notifications</p>
             </div>
 
             <label class="switch">
@@ -1812,14 +1818,6 @@
 
         </div>
 
-
-
-        
-
-
-
-        
-
     </div>
 
 
@@ -1829,25 +1827,20 @@
 
         <h2>📧 Notification Settings</h2>
 
-
-        
-
-
-
         <div class="setting-row">
 
             <div>
                 <strong>🔊 Sound Notification</strong>
-                <p>Play sound when an alert occurs</p>
+                <p>Play audio chime when an alert occurs</p>
             </div>
 
-            <label class="switch">
-
-                <input type="checkbox" id="soundNotification">
-
-                <span class="slider"></span>
-
-            </label>
+            <div style="display:flex; align-items:center; gap:12px;">
+                <button type="button" class="btn secondary" style="padding:5px 12px; font-size:12px; border-radius:6px; cursor:pointer;" onclick="testSound()">▶ Test Sound</button>
+                <label class="switch">
+                    <input type="checkbox" id="soundNotification">
+                    <span class="slider"></span>
+                </label>
+            </div>
 
         </div>
 

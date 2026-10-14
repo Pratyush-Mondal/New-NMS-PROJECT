@@ -87,6 +87,8 @@ function openPage(pageName, updateHash = true) {
         if (typeof loadAdminProfileData === 'function') loadAdminProfileData();
     } else if (pageName === 'admin-panel') {
         if (typeof loadAdminPanelData === 'function') loadAdminPanelData();
+    } else if (pageName === 'settings') {
+        if (typeof loadSettings === 'function') loadSettings();
     }
     return true;
 }
@@ -1393,11 +1395,50 @@ const defaultSettings = {
 
 
 // ------------------------------------------
-// GET ELEMENT
+// GET ELEMENT & SELECT HELPER
 // ------------------------------------------
 
 function get(id) {
     return document.getElementById(id);
+}
+
+function setSelectValueSafely(selectEl, val) {
+    if (!selectEl || val === undefined || val === null) return;
+    const strVal = String(val).trim();
+    let found = false;
+    for (let i = 0; i < selectEl.options.length; i++) {
+        if (selectEl.options[i].value === strVal) {
+            selectEl.selectedIndex = i;
+            found = true;
+            break;
+        }
+    }
+    if (!found && strVal !== "") {
+        const num = parseInt(strVal, 10);
+        let label = strVal + " Seconds";
+        if (!isNaN(num)) {
+            if (num >= 3600 && num % 3600 === 0) label = (num / 3600) + (num === 3600 ? " Hour" : " Hours");
+            else if (num >= 60 && num % 60 === 0) label = (num / 60) + (num === 60 ? " Minute" : " Minutes");
+            else if (num >= 60) {
+                const mins = Math.floor(num / 60);
+                const secs = num % 60;
+                label = `${mins}m ${secs}s`;
+            }
+        }
+        const opt = document.createElement("option");
+        opt.value = strVal;
+        opt.textContent = label;
+        selectEl.appendChild(opt);
+        selectEl.value = strVal;
+    }
+}
+
+function formatIntervalDisplay(sec) {
+    const s = Number(sec);
+    if (isNaN(s)) return `${sec}`;
+    if (s >= 3600 && s % 3600 === 0) return `${s / 3600} Hour${s > 3600 ? 's' : ''}`;
+    if (s >= 60 && s % 60 === 0) return `${s / 60} Minute${s > 60 ? 's' : ''}`;
+    return `${s}s`;
 }
 
 
@@ -1406,9 +1447,7 @@ function get(id) {
 // ------------------------------------------
 
 async function loadSettings() {
-
     let saved = localStorage.getItem("nmsSettings");
-
     let settings;
 
     if (saved) {
@@ -1437,64 +1476,46 @@ async function loadSettings() {
             }
             if (camRes.status === "fulfilled" && camRes.value && camRes.value.camera_interval) {
                 settings.cameraInterval = String(camRes.value.camera_interval);
-                if (camRes.value.camera_retry_interval) settings.cameraRetryInterval = camRes.value.camera_retry_interval;
+                if (camRes.value.camera_retry_interval) settings.cameraRetryInterval = String(camRes.value.camera_retry_interval);
                 if (camRes.value.camera_monitoring !== undefined) settings.cameraMonitoring = Boolean(camRes.value.camera_monitoring);
             }
             localStorage.setItem("nmsSettings", JSON.stringify(settings));
         } catch (_) {}
     }
 
-
     // GENERAL
-    if (!get("theme")) return;
-    get("theme").value = settings.theme || defaultSettings.theme;
-    get("language").value = settings.language || defaultSettings.language;
-    if(get("timeFormat")) get("timeFormat").value = settings.timeFormat || defaultSettings.timeFormat;
-    
-
+    if (get("theme")) get("theme").value = settings.theme || defaultSettings.theme;
+    if (get("language")) get("language").value = settings.language || defaultSettings.language;
+    if (get("timeFormat")) get("timeFormat").value = settings.timeFormat || defaultSettings.timeFormat;
 
     // NETWORK
-    get("networkMonitoring").checked =
-        settings.networkMonitoring ?? defaultSettings.networkMonitoring;
-
-    get("networkInterval").value =
-        settings.networkInterval || defaultSettings.networkInterval;
-
+    if (get("networkMonitoring")) {
+        get("networkMonitoring").checked = settings.networkMonitoring ?? defaultSettings.networkMonitoring;
+    }
+    setSelectValueSafely(get("networkInterval"), settings.networkInterval || defaultSettings.networkInterval);
 
     // CAMERA
-    get("cameraMonitoring").checked =
-        settings.cameraMonitoring ?? defaultSettings.cameraMonitoring;
-
-    get("cameraInterval").value =
-        settings.cameraInterval || defaultSettings.cameraInterval;
-
-    get("cameraRetryInterval").value =
-        settings.cameraRetryInterval || 120;
+    if (get("cameraMonitoring")) {
+        get("cameraMonitoring").checked = settings.cameraMonitoring ?? defaultSettings.cameraMonitoring;
+    }
+    setSelectValueSafely(get("cameraInterval"), settings.cameraInterval || defaultSettings.cameraInterval);
+    setSelectValueSafely(get("cameraRetryInterval"), settings.cameraRetryInterval || 120);
 
     // ALERT
-    get("alert").checked =
-        settings.alert ?? defaultSettings.alert;
-
+    if (get("alert")) {
+        get("alert").checked = settings.alert ?? defaultSettings.alert;
+    }
 
     // NOTIFICATION
-
-    get("soundNotification").checked =
-        settings.soundNotification ?? defaultSettings.soundNotification;
-
-
-    // BACKUP
-
-
-    // RETENTION
-
+    if (get("soundNotification")) {
+        get("soundNotification").checked = settings.soundNotification ?? defaultSettings.soundNotification;
+    }
 
     // APPLY THEME
-    applyTheme(settings.theme);
-
+    if (typeof applyTheme === 'function') applyTheme(settings.theme);
 
     // APPLY LANGUAGE
-    applyLanguage(settings.language);
-
+    if (typeof applyLanguage === 'function') applyLanguage(settings.language);
 
     console.log("NMS Settings Loaded", settings);
 }
@@ -1511,120 +1532,81 @@ function persistCurrentSettings(showMsg = false) {
 }
 
 async function saveSettings() {
-
     const settings = {
-
-        theme: get("theme").value,
-
-        language: get("language").value,
-
+        theme: get("theme") ? get("theme").value : "dark",
+        language: get("language") ? get("language").value : "en",
         timeFormat: get("timeFormat") ? get("timeFormat").value : "24",
-
-        networkMonitoring:
-            get("networkMonitoring").checked,
-
-        networkInterval:
-            get("networkInterval").value,
-
-
-        cameraMonitoring:
-            get("cameraMonitoring").checked,
-
-        cameraInterval:
-            get("cameraInterval").value,
-
-        cameraRetryInterval:
-            parseInt(
-                document.getElementById("cameraRetryInterval").value
-            ),
-        alert:
-            get("alert").checked,
-
-        soundNotification:
-            get("soundNotification").checked,
+        networkMonitoring: get("networkMonitoring") ? get("networkMonitoring").checked : true,
+        networkInterval: get("networkInterval") ? get("networkInterval").value : "60",
+        cameraMonitoring: get("cameraMonitoring") ? get("cameraMonitoring").checked : true,
+        cameraInterval: get("cameraInterval") ? get("cameraInterval").value : "1800",
+        cameraRetryInterval: get("cameraRetryInterval") ? parseInt(get("cameraRetryInterval").value, 10) : 300,
+        alert: get("alert") ? get("alert").checked : true,
+        soundNotification: get("soundNotification") ? get("soundNotification").checked : true,
     };
 
-
     // SAVE TO LOCAL STORAGE
-    localStorage.setItem(
-        "nmsSettings",
-        JSON.stringify(settings)
-    );
-
-
-    // ==========================================
-    // SYNC CCTV SETTINGS WITH BACKEND
-    // ==========================================
+    localStorage.setItem("nmsSettings", JSON.stringify(settings));
 
     const token = localStorage.getItem("access_token");
-
     if (!token) {
-        showMessage("⚠ Login session পাওয়া যায়নি");
+        if (typeof showMessage === 'function') showMessage("⚠ Login session expired");
         return;
     }
 
+    const apiBase = (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL !== undefined && window.APP_CONFIG.API_BASE_URL !== null)
+                    ? window.APP_CONFIG.API_BASE_URL : (typeof NMS_API_BASE !== 'undefined' ? NMS_API_BASE : "");
+
+    // 1. SYNC CAMERA MONITORING SETTINGS TO BACKEND
     try {
+        const cameraResponse = await fetch(`${apiBase}/api/settings/camera`, {
+            method: "PUT",
+            headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${token}`
+            },
+            body: JSON.stringify({
+                camera_monitoring: settings.cameraMonitoring,
+                camera_interval: Number(settings.cameraInterval),
+                camera_retry_interval: Number(settings.cameraRetryInterval)
+            })
+        });
 
-        const cameraResponse = await fetch(
-            window.APP_CONFIG.API_BASE_URL + "/api/settings/camera",
-            {
-                method: "PUT",
-                headers: {
-                    "Content-Type": "application/json",
-                    "Authorization": `Bearer ${token}`
-                },
-                body: JSON.stringify({
-                    camera_monitoring: settings.cameraMonitoring,
-                    camera_interval: Number(settings.cameraInterval),
-                    camera_retry_interval: Number(settings.cameraRetryInterval)
-                })
-            }
-        );
-
-        const cameraData = await cameraResponse.json();
-
+        const cameraData = await cameraResponse.json().catch(() => ({}));
         if (!cameraResponse.ok || !cameraData.success) {
-            throw new Error(
-                cameraData.detail ||
-                cameraData.message ||
-                "CCTV settings sync failed."
-            );
+            console.warn("CCTV settings sync detail:", cameraData);
+        } else {
+            console.log("✅ CCTV settings synced:", cameraData);
         }
-
-        console.log(
-            "✅ CCTV settings synced:",
-            cameraData
-        );
-
     } catch (error) {
-
-        console.error(
-            "CCTV settings sync error:",
-            error
-        );
-
-        showMessage(
-            "⚠ CCTV setting backend-e save hoyni"
-        );
-
-        return;
+        console.error("CCTV settings sync error:", error);
     }
 
-    // APPLY SETTINGS
-    applyTheme(settings.theme);
+    // 2. SYNC NETWORK SETTINGS TO BACKEND
+    try {
+        await syncNetworkSettingsToBackend(false);
+    } catch (error) {
+        console.error("Network settings sync error:", error);
+    }
 
-    applyLanguage(settings.language);
-    updateClock();
+    if (typeof syncGlobalSettingsToBackend === 'function') {
+        syncGlobalSettingsToBackend(settings);
+    }
 
-    // SYNC SETTINGS WITH BACKEND
-    await syncNetworkSettingsToBackend(false);
-    syncGlobalSettingsToBackend(settings);
+    // APPLY THEME & LANGUAGE
+    if (typeof applyTheme === 'function') applyTheme(settings.theme);
+    if (typeof applyLanguage === 'function') applyLanguage(settings.language);
+    if (typeof updateClock === 'function') updateClock();
 
-    // RESTART FRONTEND TIMERS WITH NEW INTERVALS
+    // RESTART FRONTEND TIMERS WITH NEW INTERVALS IMMEDIATELY
     if (typeof startAutoMonitor === 'function') startAutoMonitor();
     if (typeof startBackgroundPinging === 'function') startBackgroundPinging();
 
-    toast(`✓ Settings saved: Network Interval ${settings.networkInterval}s | Camera Interval ${settings.cameraInterval}s`);
+    const netText = formatIntervalDisplay(settings.networkInterval);
+    const camText = formatIntervalDisplay(settings.cameraInterval);
+    const retryText = formatIntervalDisplay(settings.cameraRetryInterval);
+
+    toast(`✓ Settings saved: Network: ${netText} | Camera: ${camText} | Retry: ${retryText}`);
     if (typeof showMessage === 'function') showMessage("✓ Settings saved successfully");
 
     console.log("Settings Saved:", settings);
@@ -1711,86 +1693,107 @@ function applyLanguage(language) {
 
 
 // ------------------------------------------
-// SOUND
+// ADVANCED NOTIFICATION CHIME & AUDIO ENGINE
 // ------------------------------------------
 
-function playSound() {
+let _sharedAudioCtx = null;
 
-    const soundEnabled =
-        get("soundNotification").checked;
+function getSharedAudioContext() {
+    try {
+        if (!_sharedAudioCtx) {
+            const AudioCtx = window.AudioContext || window.webkitAudioContext;
+            if (AudioCtx) {
+                _sharedAudioCtx = new AudioCtx();
+            }
+        }
+        if (_sharedAudioCtx && _sharedAudioCtx.state === 'suspended') {
+            _sharedAudioCtx.resume().catch(() => {});
+        }
+        return _sharedAudioCtx;
+    } catch (e) {
+        return null;
+    }
+}
 
+// Automatically unlock AudioContext on ANY user gesture
+['click', 'keydown', 'mousedown', 'touchstart'].forEach(eventName => {
+    document.addEventListener(eventName, function unlockAudio() {
+        getSharedAudioContext();
+    }, { passive: true });
+});
 
-    if (!soundEnabled) {
+function isSoundNotificationEnabled() {
+    try {
+        const toggle = document.getElementById("soundNotification");
+        if (toggle) return toggle.checked;
+        const saved = JSON.parse(localStorage.getItem("nmsSettings") || "{}");
+        if (saved.soundNotification !== undefined) return Boolean(saved.soundNotification);
+    } catch (_) {}
+    return true;
+}
+
+function playSound(forced = false) {
+    if (!forced && !isSoundNotificationEnabled()) {
         return;
     }
 
+    try {
+        const ctx = getSharedAudioContext();
+        if (ctx) {
+            if (ctx.state === 'suspended') {
+                ctx.resume().catch(() => {});
+            }
 
-    // ছোট notification beep
-    const audioContext =
-        new (
-            window.AudioContext ||
-            window.webkitAudioContext
-        )();
+            const now = ctx.currentTime;
+            
+            // Dual-tone chime: Tone 1 (Ding 880Hz) -> Tone 2 (Dong 1175Hz)
+            const osc1 = ctx.createOscillator();
+            const gain1 = ctx.createGain();
+            osc1.type = 'sine';
+            osc1.frequency.setValueAtTime(880, now);
+            gain1.gain.setValueAtTime(0.35, now);
+            gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.28);
+            osc1.connect(gain1);
+            gain1.connect(ctx.destination);
+            osc1.start(now);
+            osc1.stop(now + 0.28);
 
+            const osc2 = ctx.createOscillator();
+            const gain2 = ctx.createGain();
+            osc2.type = 'sine';
+            osc2.frequency.setValueAtTime(1174.66, now + 0.12);
+            gain2.gain.setValueAtTime(0.35, now + 0.12);
+            gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.45);
+            osc2.connect(gain2);
+            gain2.connect(ctx.destination);
+            osc2.start(now + 0.12);
+            osc2.stop(now + 0.45);
 
-    const oscillator =
-        audioContext.createOscillator();
+            return;
+        }
+    } catch (err) {
+        console.warn("WebAudio chime notice:", err);
+    }
 
-
-    const gainNode =
-        audioContext.createGain();
-
-
-    oscillator.connect(gainNode);
-
-    gainNode.connect(
-        audioContext.destination
-    );
-
-
-    oscillator.frequency.value = 800;
-
-    oscillator.type = "sine";
-
-
-    gainNode.gain.setValueAtTime(
-        0.2,
-        audioContext.currentTime
-    );
-
-
-    oscillator.start();
-
-
-    oscillator.stop(
-        audioContext.currentTime + 0.15
-    );
+    // Fallback: HTML5 Audio synthetic wav beep
+    try {
+        const fallbackAudio = new Audio("data:audio/wav;base64,UklGRl9vT19XQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YU9vT18AAAA=");
+        fallbackAudio.play().catch(() => {});
+    } catch (_) {}
 }
-
-
-
-// ------------------------------------------
-// TEST SOUND
-// ------------------------------------------
+window.playSound = playSound;
 
 function testSound() {
-
-    if (get("soundNotification").checked) {
-
-        playSound();
-
-        showMessage(
-            "🔊 Sound notification is ON"
-        );
-
-    } else {
-
-        showMessage(
-            "🔇 Sound notification is OFF"
-        );
-
+    playSound(true);
+    const enabled = isSoundNotificationEnabled();
+    const msg = enabled ? "🔊 Playing Test Alert Chime (Sound ON)" : "🔊 Playing Test Chime (Sound switch is OFF)";
+    if (typeof toast === 'function') {
+        toast(msg);
+    } else if (typeof showMessage === 'function') {
+        showMessage(msg);
     }
 }
+window.testSound = testSound;
 
 
 
@@ -6954,7 +6957,7 @@ async function loadDashboardStats() {
                 
                 let prevAlertCount = window.lastKnownAlertCount !== undefined ? window.lastKnownAlertCount : data.active_alerts;
                 if (data.active_alerts > prevAlertCount && enableAlerts) {
-                    toast("?? New system alert received!");
+                    if (typeof toast === "function") toast("⚠️ New system alert detected!");
                     if (typeof playSound === "function") playSound();
                 }
                 window.lastKnownAlertCount = data.active_alerts;
