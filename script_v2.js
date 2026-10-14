@@ -1639,10 +1639,9 @@ async function saveSettings() {
 
     const netText = formatIntervalDisplay(settings.networkInterval);
     const camText = formatIntervalDisplay(settings.cameraInterval);
-    const deskText = formatIntervalDisplay(settings.desktopInterval);
     const retryText = formatIntervalDisplay(settings.cameraRetryInterval);
 
-    toast(`✓ Settings saved: Devices: ${netText} | CCTV: ${camText} | Desktops: ${deskText}`);
+    toast(`✓ Settings saved: Devices: ${netText} | CCTV: ${camText}`);
     if (typeof showMessage === 'function') showMessage("✓ Settings saved successfully");
 
     console.log("Settings Saved:", settings);
@@ -1762,16 +1761,20 @@ function getSharedAudioContext() {
 
 function isSoundNotificationEnabled() {
     try {
+        const saved = JSON.parse(localStorage.getItem("nmsSettings") || "{}");
+        if (saved.soundNotification !== undefined) {
+            return Boolean(saved.soundNotification);
+        }
         const toggle = document.getElementById("soundNotification");
         if (toggle) return toggle.checked;
-        const saved = JSON.parse(localStorage.getItem("nmsSettings") || "{}");
-        if (saved.soundNotification !== undefined) return Boolean(saved.soundNotification);
     } catch (_) {}
     return true;
 }
 
 function playSound(forced = false) {
-    if (!forced && !isSoundNotificationEnabled()) {
+    // Only bypass when explicitly testing sound from the Settings page (forced === true)
+    if (forced !== true && !isSoundNotificationEnabled()) {
+        console.log("🔇 Sound notification is OFF in settings. Audio chime suppressed.");
         return;
     }
 
@@ -2735,6 +2738,14 @@ function refreshDesktopSummary() {
 function renderDesktopRows(list = desktopData) {
     const tbody = document.querySelector('#desktops table tbody');
     if (!tbody) return;
+    if (!list || list.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding:36px 16px; color:#8ea2b8;">
+            <div style="font-size:15px; font-weight:600; color:#e2e8f0; margin-bottom:6px;">Desktop Monitoring is Paused</div>
+            <div style="font-size:13px; color:#94a3b8;">Click <b>📍 Monitor Location</b> above to select a location and turn monitoring ON.</div>
+        </td></tr>`;
+        refreshDesktopSummary();
+        return;
+    }
     tbody.innerHTML = list.map(d => `
         <tr>
             <td><strong>${d.id}</strong></td>
@@ -6208,22 +6219,8 @@ async function setDesktopMonitoringState(enabled) {
     }
 
     const newState = Boolean(enabled);
-
-    /*
-     * Monitoring ON করতে হলে আগে location লাগবে.
-     */
-    if (
-        newState &&
-        !selectedDesktopMonitoringLocation
-    ) {
-
-        alert(
-            'Please select a desktop location first.'
-        );
-
-        updateDesktopMonitoringUI();
-
-        return;
+    if (!selectedDesktopMonitoringLocation) {
+        selectedDesktopMonitoringLocation = "All Locations";
     }
 
     try {
@@ -6232,32 +6229,20 @@ async function setDesktopMonitoringState(enabled) {
             `${NMS_API_BASE}/api/desktops/monitoring`,
             {
                 method: 'PUT',
-
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization':
-                        `Bearer ${token}`
+                    'Authorization': `Bearer ${token}`
                 },
-
                 body: JSON.stringify({
                     enabled: newState,
-                    selected_location:
-                        newState
-                            ? selectedDesktopMonitoringLocation
-                            : null
+                    selected_location: newState ? selectedDesktopMonitoringLocation : null
                 })
             }
         );
 
         const data = await response.json();
 
-        console.log(
-            'Desktop monitoring backend response:',
-            data
-        );
-
         if (!response.ok || !data.success) {
-
             throw new Error(
                 data.detail ||
                 data.message ||
@@ -6265,55 +6250,21 @@ async function setDesktopMonitoringState(enabled) {
             );
         }
 
-        /*
-         * Backend successfully saved the state.
-         */
-        desktopMonitoringEnabled =
-            newState;
-
+        desktopMonitoringEnabled = newState;
         localStorage.setItem(
             'desktopMonitoringEnabled',
             String(newState)
         );
 
-        if (!newState) {
-
-            /*
-             * Monitoring OFF হলে table-ও empty হবে.
-             */
-            renderDesktopRows([]);
-
-        } else {
-
-            /*
-             * Selected location-এর desktop দেখাবে.
-             */
-            const selectedLocation =
-                String(
-                    selectedDesktopMonitoringLocation
-                )
-                    .trim()
-                    .toLowerCase();
-
-            const filteredDesktops =
-                desktopData.filter(
-                    function (desktop) {
-
-                        return String(
-                            desktop.location || ''
-                        )
-                            .trim()
-                            .toLowerCase() ===
-                            selectedLocation;
-                    }
-                );
-
-            renderDesktopRows(
-                filteredDesktops
-            );
-        }
-
         updateDesktopMonitoringUI();
+
+        if (newState) {
+            toast(`🟢 Desktop monitoring ON: ${selectedDesktopMonitoringLocation}`);
+            triggerAutoPingAllDesktops(false);
+        } else {
+            toast("🔴 Desktop monitoring OFF");
+            renderDesktopRows([]);
+        }
 
         console.log(
             newState
@@ -6328,13 +6279,7 @@ async function setDesktopMonitoringState(enabled) {
             error
         );
 
-        /*
-         * Backend update failed হলে
-         * checkbox আগের অবস্থায় ফিরবে.
-         */
-        desktopMonitoringEnabled =
-            !newState;
-
+        desktopMonitoringEnabled = !newState;
         updateDesktopMonitoringUI();
 
         alert(
@@ -6463,16 +6408,14 @@ async function loadDesktopMonitoringState() {
                     .toLowerCase();
 
             const filteredDesktops =
-                desktopData.filter(function (desktop) {
-
-                    return String(
-                        desktop.location || ''
-                    )
-                        .trim()
-                        .toLowerCase() ===
-                        selectedLocation;
-
-                });
+                (!selectedLocation || selectedLocation === 'all' || selectedLocation === 'all locations')
+                    ? desktopData
+                    : desktopData.filter(function (desktop) {
+                        return String(desktop.location || '')
+                            .trim()
+                            .toLowerCase() ===
+                            selectedLocation;
+                    });
 
             renderDesktopRows(
                 filteredDesktops
@@ -6582,14 +6525,14 @@ function renderDesktopLocationOptions(
         searchText
     ).trim().toLowerCase();
 
-    const locations =
-        getDesktopLocations().filter(
-            function (location) {
-                return location
-                    .toLowerCase()
-                    .includes(query);
-            }
-        );
+    const rawLocations = getDesktopLocations();
+    let locations = ["All Locations", ...rawLocations.filter(loc => loc.toLowerCase() !== "all locations")];
+
+    if (query) {
+        locations = locations.filter(function (location) {
+            return location.toLowerCase().includes(query);
+        });
+    }
 
     if (!locations.length) {
 
@@ -6614,8 +6557,9 @@ function renderDesktopLocationOptions(
             function (location) {
 
                 const isSelected =
-                    selectedDesktopMonitoringLocation ===
-                    location;
+                    (selectedDesktopMonitoringLocation &&
+                     selectedDesktopMonitoringLocation.toLowerCase() === location.toLowerCase()) ||
+                    (!selectedDesktopMonitoringLocation && location === "All Locations");
 
                 return `
                     <button
@@ -6624,7 +6568,9 @@ function renderDesktopLocationOptions(
                         data-location="${location}"
                         style="
                             width:100%;
-                            display:block;
+                            display:flex;
+                            align-items:center;
+                            justify-content:space-between;
                             text-align:left;
                             padding:12px 14px;
                             margin-bottom:8px;
@@ -6636,7 +6582,8 @@ function renderDesktopLocationOptions(
                             font-size:14px;
                         "
                     >
-                        📍 ${location}
+                        <span>📍 ${location}</span>
+                        ${isSelected ? '<span style="color:#38bdf8; font-size:12px; font-weight:600;">✓ Active</span>' : ''}
                     </button>
                 `;
             }
@@ -6677,12 +6624,7 @@ function renderDesktopLocationOptions(
 async function applyDesktopMonitoringLocation() {
 
     if (!selectedDesktopMonitoringLocation) {
-
-        alert(
-            "Please select a desktop location first."
-        );
-
-        return;
+        selectedDesktopMonitoringLocation = "All Locations";
     }
 
     const token =
@@ -6703,12 +6645,6 @@ async function applyDesktopMonitoringLocation() {
 
     try {
 
-        /*
-         * Backend-এ selected location save হবে.
-         *
-         * Monitoring ON/OFF state
-         * এখন change করছি না.
-         */
         const response = await fetch(
             `${NMS_API_BASE}/api/desktops/monitoring`,
             {
@@ -6733,11 +6669,6 @@ async function applyDesktopMonitoringLocation() {
         const data =
             await response.json();
 
-        console.log(
-            "Desktop location backend response:",
-            data
-        );
-
         if (
             !response.ok ||
             !data.success
@@ -6750,9 +6681,6 @@ async function applyDesktopMonitoringLocation() {
             );
         }
 
-        /*
-         * Frontend state
-         */
         selectedDesktopMonitoringLocation =
             selectedLocation;
 
@@ -6761,9 +6689,6 @@ async function applyDesktopMonitoringLocation() {
             selectedLocation
         );
 
-        /*
-         * Button update
-         */
         const button =
             document.getElementById(
                 "desktopLocationBtn"
@@ -6776,15 +6701,19 @@ async function applyDesktopMonitoringLocation() {
                 selectedLocation;
         }
 
-        /*
-         * Always display all desktops in inventory.
-         */
-        renderDesktopRows(desktopData);
-
-        /*
-         * Modal close
-         */
         closeDesktopLocationModal();
+
+        if (desktopMonitoringEnabled) {
+            toast(`📍 Desktop monitoring active for: ${selectedLocation}`);
+            triggerAutoPingAllDesktops(false);
+        } else {
+            toast("🔴 Desktop monitoring is currently OFF");
+            const loc = String(selectedLocation).trim().toLowerCase();
+            const filtered = (!loc || loc === 'all' || loc === 'all locations')
+                ? desktopData
+                : desktopData.filter(d => String(d.location || '').trim().toLowerCase() === loc);
+            renderDesktopRows(filtered);
+        }
 
         console.log(
             "✅ Desktop monitoring location saved:",
@@ -6969,6 +6898,37 @@ document.addEventListener(
 
         loadDesktopMonitoringState();
 
+        const soundToggle = document.getElementById("soundNotification");
+        soundToggle?.addEventListener("change", function () {
+            let settings = {};
+            try { settings = JSON.parse(localStorage.getItem("nmsSettings") || "{}"); } catch (e) {}
+            settings.soundNotification = this.checked;
+            localStorage.setItem("nmsSettings", JSON.stringify(settings));
+
+            if (this.checked) {
+                toast("🔊 Sound notification enabled");
+                playSound(true);
+            } else {
+                toast("🔇 Sound notification muted");
+            }
+
+            if (typeof syncGlobalSettingsToBackend === 'function') {
+                syncGlobalSettingsToBackend(settings);
+            }
+        });
+
+        const alertToggle = document.getElementById("alert");
+        alertToggle?.addEventListener("change", function () {
+            let settings = {};
+            try { settings = JSON.parse(localStorage.getItem("nmsSettings") || "{}"); } catch (e) {}
+            settings.alert = this.checked;
+            localStorage.setItem("nmsSettings", JSON.stringify(settings));
+            toast(this.checked ? "🚨 Alert system enabled" : "⚠️ Alert system disabled");
+
+            if (typeof syncGlobalSettingsToBackend === 'function') {
+                syncGlobalSettingsToBackend(settings);
+            }
+        });
     }
 );
 
@@ -6994,9 +6954,9 @@ async function loadDashboardStats() {
                 }
                 
                 let prevAlertCount = window.lastKnownAlertCount !== undefined ? window.lastKnownAlertCount : data.active_alerts;
-                if (data.active_alerts > prevAlertCount && enableAlerts) {
+                if (data.active_alerts > prevAlertCount && enableAlerts && isSoundNotificationEnabled()) {
                     if (typeof toast === "function") toast("⚠️ New system alert detected!");
-                    if (typeof playSound === "function") playSound();
+                    if (typeof playSound === "function") playSound(true);
                 }
                 window.lastKnownAlertCount = data.active_alerts;
 
@@ -7323,9 +7283,7 @@ function getAutoPingIntervals() {
         networkEnabled: s.networkMonitoring !== false,
         networkInterval: Math.max(3, parseInt(s.networkInterval, 10) || 10),
         cameraEnabled: s.cameraMonitoring !== false,
-        cameraInterval: Math.max(3, parseInt(s.cameraInterval, 10) || 30),
-        desktopEnabled: s.desktopMonitoring !== false,
-        desktopInterval: Math.max(3, parseInt(s.desktopInterval || s.networkInterval, 10) || 10)
+        cameraInterval: Math.max(3, parseInt(s.cameraInterval, 10) || 30)
     };
 }
 
@@ -7333,7 +7291,6 @@ function resetAutoPingTimers() {
     const cfg = getAutoPingIntervals();
     devicePingCountdown = cfg.networkInterval;
     cameraPingCountdown = cfg.cameraInterval;
-    desktopPingCountdown = cfg.desktopInterval;
     updateAutoPingBannerUI();
 }
 window.resetAutoPingTimers = resetAutoPingTimers;
@@ -7372,23 +7329,6 @@ function updateAutoPingBannerUI() {
             camCount.className = 'auto-ping-badge';
             camCount.innerHTML = `Next ping in <b id="camerasCountdownText">${cameraPingCountdown}s</b>`;
             if (camDot) camDot.style.background = '#10b981';
-        }
-    }
-
-    // 3. DESKTOPS BANNER
-    const deskBadge = document.getElementById('desktopsIntervalBadge');
-    const deskCount = document.getElementById('desktopsCountdownBadge');
-    const deskDot = document.getElementById('desktopsPulseDot');
-    if (deskBadge) deskBadge.innerHTML = `Interval: <b>${formatIntervalDisplay(cfg.desktopInterval)}</b>`;
-    if (deskCount) {
-        if (!cfg.desktopEnabled) {
-            deskCount.className = 'auto-ping-badge';
-            deskCount.innerHTML = '⏸ Paused (Disabled in Settings)';
-            if (deskDot) deskDot.style.background = '#64748b';
-        } else if (!isPingingDesktops) {
-            deskCount.className = 'auto-ping-badge';
-            deskCount.innerHTML = `Next ping in <b id="desktopsCountdownText">${desktopPingCountdown}s</b>`;
-            if (deskDot) deskDot.style.background = '#10b981';
         }
     }
 }
@@ -7532,8 +7472,8 @@ async function triggerAutoPingAllDesktops(isManual = false) {
         if (res.ok && data.success && Array.isArray(data.desktops)) {
             const prevOfflineCount = (window.desktopData || []).filter(d => d.status === 'Offline').length;
             const newOfflineCount = data.desktops.filter(d => d.status === 'Offline').length;
-            if (newOfflineCount > prevOfflineCount && typeof playSound === 'function') {
-                playSound('alert');
+            if (newOfflineCount > prevOfflineCount && isSoundNotificationEnabled() && typeof playSound === 'function') {
+                playSound(true);
             }
 
             window.desktopData = data.desktops.map(desktop => ({
@@ -7555,16 +7495,20 @@ async function triggerAutoPingAllDesktops(isManual = false) {
                 uptime_percent: desktop.uptime_percent
             }));
 
+            // Filter desktop table according to location if specific location is selected
+            const loc = String(selectedDesktopMonitoringLocation || '').trim().toLowerCase();
+            let displayList = window.desktopData;
+            if (desktopMonitoringEnabled && loc && loc !== 'all' && loc !== 'all locations') {
+                displayList = window.desktopData.filter(d => String(d.location || '').trim().toLowerCase() === loc);
+            }
+
             if (typeof renderDesktopRows === 'function') {
-                renderDesktopRows(window.desktopData);
+                renderDesktopRows(displayList);
             }
             if (typeof updateDesktopStats === 'function') {
                 updateDesktopStats();
             }
 
-            const nowTime = new Date().toLocaleTimeString();
-            const lastSync = document.getElementById('desktopsLastSyncText');
-            if (lastSync) lastSync.textContent = `✓ Synced at ${nowTime}`;
             if (isManual) toast(`✓ All ${data.desktops.length} desktops pinged & refreshed`);
         }
     } catch (err) {
@@ -7572,9 +7516,6 @@ async function triggerAutoPingAllDesktops(isManual = false) {
     } finally {
         isPingingDesktops = false;
         if (btn) btn.disabled = false;
-        const cfg = getAutoPingIntervals();
-        desktopPingCountdown = cfg.desktopInterval;
-        updateAutoPingBannerUI();
     }
 }
 window.triggerAutoPingAllDesktops = triggerAutoPingAllDesktops;
@@ -7592,7 +7533,7 @@ function startAutoMonitor() {
         globalTick++;
         const cfg = getAutoPingIntervals();
 
-        // 1. Tick devices
+        // 1. Tick devices (using configured network interval)
         if (cfg.networkEnabled) {
             devicePingCountdown--;
             if (devicePingCountdown <= 0) {
@@ -7600,7 +7541,7 @@ function startAutoMonitor() {
             }
         }
 
-        // 2. Tick cameras
+        // 2. Tick cameras (using configured camera interval)
         if (cfg.cameraEnabled) {
             cameraPingCountdown--;
             if (cameraPingCountdown <= 0) {
@@ -7608,26 +7549,102 @@ function startAutoMonitor() {
             }
         }
 
-        // 3. Tick desktops
-        if (cfg.desktopEnabled) {
-            desktopPingCountdown--;
-            if (desktopPingCountdown <= 0) {
-                triggerAutoPingAllDesktops(false);
-            }
+        // 3. Desktop monitoring: Controlled ONLY via "Monitor Location" modal
+        // If desktop monitoring is ON, background ping runs every 10s quietly for monitored desktops
+        if (desktopMonitoringEnabled && globalTick % 10 === 0) {
+            triggerAutoPingAllDesktops(false);
         }
 
-        // 4. Update banner visual labels & countdown numbers
+        // 4. Update banner visual labels & countdown numbers for devices and cameras
         updateAutoPingBannerUI();
 
-        // 5. Global dashboard stats and alerts polling every 5s
-        if (globalTick % 5 === 0) {
+        // 5. Global dashboard stats and automatic alert monitoring with sound chime (runs every 4s)
+        if (globalTick % 4 === 0) {
             if (typeof loadDashboardStats === 'function') loadDashboardStats();
-            const activePage = window.currentPage || document.querySelector('.page.active')?.id || 'dashboard';
-            if (activePage === 'alerts' && typeof loadAlerts === 'function') loadAlerts();
+            if (typeof checkGlobalAlertsWithSound === 'function') checkGlobalAlertsWithSound();
         }
     }, 1000);
 }
 window.startAutoMonitor = startAutoMonitor;
+
+let _seenAlertIds = null;
+
+async function checkGlobalAlertsWithSound() {
+    const token = localStorage.getItem('access_token');
+    if (!token) return;
+
+    try {
+        let enableAlerts = true;
+        try {
+            const s = JSON.parse(localStorage.getItem('nmsSettings') || '{}');
+            if (s.alert === false) enableAlerts = false;
+        } catch(e){}
+
+        if (!enableAlerts) return;
+
+        const apiBase = (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL) || (typeof NMS_API_BASE !== 'undefined' ? NMS_API_BASE : '');
+        const res = await fetch(`${apiBase}/api/alerts?_t=${Date.now()}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!res.ok) return;
+
+        const data = await res.json().catch(() => ({}));
+        if (!data.success || !Array.isArray(data.alerts)) return;
+
+        const currentAlerts = data.alerts;
+        const currentIds = new Set(currentAlerts.map(a => Number(a.id)));
+
+        // Initial check on load: capture existing IDs without chime
+        if (_seenAlertIds === null) {
+            _seenAlertIds = currentIds;
+            const sbAlerts = document.getElementById('sidebarAlertsCount');
+            const hrAlerts = document.getElementById('headerAlertsCount');
+            if (sbAlerts) sbAlerts.textContent = currentAlerts.length;
+            if (hrAlerts) hrAlerts.textContent = currentAlerts.length;
+            return;
+        }
+
+        // Check for new unacknowledged alerts
+        let hasNew = false;
+        let newest = null;
+        for (const a of currentAlerts) {
+            const aid = Number(a.id);
+            if (!_seenAlertIds.has(aid)) {
+                hasNew = true;
+                _seenAlertIds.add(aid);
+                newest = a;
+            }
+        }
+
+        if (hasNew && newest) {
+            console.log("🚨 New alert detected:", newest);
+            if (isSoundNotificationEnabled()) {
+                console.log("🔊 Playing alert chime (sound notification enabled in Settings)...");
+                playSound(true);
+            }
+            if (typeof toast === 'function') {
+                const icon = newest.severity === 'Critical' ? '🚨' : (newest.severity === 'Warning' ? '⚠️' : 'ℹ️');
+                toast(`${icon} ${newest.message}`);
+            }
+
+            // If user is currently on Alerts page, re-render immediately
+            const activePage = window.currentPage || document.querySelector('.page.active')?.id || '';
+            if (activePage === 'alerts' && typeof loadAlerts === 'function') {
+                loadAlerts();
+            }
+        }
+
+        // Always sync sidebar & header badge counters
+        const sbAlerts = document.getElementById('sidebarAlertsCount');
+        const hrAlerts = document.getElementById('headerAlertsCount');
+        if (sbAlerts) sbAlerts.textContent = currentAlerts.length;
+        if (hrAlerts) hrAlerts.textContent = currentAlerts.length;
+
+    } catch (err) {
+        console.warn("Global alert checking error:", err);
+    }
+}
+window.checkGlobalAlertsWithSound = checkGlobalAlertsWithSound;
 
 document.addEventListener('DOMContentLoaded', () => {
     setTimeout(() => {

@@ -250,15 +250,15 @@ threading.Thread(target=status_monitor_loop, daemon=True).start()
 from pydantic import BaseModel
 
 class GlobalSettingsRequest(BaseModel):
-    alert: bool
-    autoRecovery: bool
-    autoRestart: bool
-    emailNotification: bool
-    soundNotification: bool
-    automaticBackup: bool
-    autoCleanup: bool
-    historyRetention: int
-    backupRetention: int
+    alert: bool = True
+    autoRecovery: bool = False
+    autoRestart: bool = False
+    emailNotification: bool = False
+    soundNotification: bool = True
+    automaticBackup: bool = False
+    autoCleanup: bool = False
+    historyRetention: int = 30
+    backupRetention: int = 7
 
 @router.put("/api/settings/global")
 def update_global_settings(data: GlobalSettingsRequest, admin=Depends(verify_admin)):
@@ -267,6 +267,13 @@ def update_global_settings(data: GlobalSettingsRequest, admin=Depends(verify_adm
         raise HTTPException(status_code=500, detail="DB Error")
     cursor = db.cursor()
     try:
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS system_settings (
+                setting_key VARCHAR(100) PRIMARY KEY,
+                setting_value TEXT,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            )
+        """)
         settings_dict = data.dict()
         for k, v in settings_dict.items():
             cursor.execute("INSERT INTO system_settings (setting_key, setting_value) VALUES (%s, %s) ON DUPLICATE KEY UPDATE setting_value = %s", (k, str(v), str(v)))
@@ -283,6 +290,13 @@ def get_global_settings(admin=Depends(verify_admin)):
         raise HTTPException(status_code=500, detail="DB Error")
     cursor = db.cursor(dictionary=True)
     try:
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS system_settings (
+                setting_key VARCHAR(100) PRIMARY KEY,
+                setting_value TEXT,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            )
+        """)
         cursor.execute("SELECT setting_key, setting_value FROM system_settings")
         rows = cursor.fetchall()
         settings = {r["setting_key"]: r["setting_value"] for r in rows}

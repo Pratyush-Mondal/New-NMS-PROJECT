@@ -1250,21 +1250,6 @@
 </button>
     </div>
 
-    <!-- DESKTOP LIVE AUTO-PING STATUS BANNER -->
-    <div class="auto-ping-banner" id="desktopsAutoPingBanner">
-      <div class="auto-ping-info">
-        <span class="auto-ping-dot pulse-dot" id="desktopsPulseDot"></span>
-        <span class="auto-ping-title">Desktop Auto-Ping Active</span>
-        <span class="auto-ping-chip" id="desktopsIntervalBadge">Interval: <b>10s</b></span>
-        <span class="auto-ping-badge" id="desktopsCountdownBadge">Next ping in <b id="desktopsCountdownText">10s</b></span>
-        <span class="auto-ping-sync-time" id="desktopsLastSyncText">Ready</span>
-      </div>
-      <div class="auto-ping-actions">
-        <button type="button" class="auto-ping-btn" id="triggerDesktopsPingBtn" onclick="triggerAutoPingAllDesktops(true)">
-          ⚡ Ping All Desktops Now
-        </button>
-      </div>
-    </div>
 
     <!-- Desktop Summary -->
 
@@ -1844,47 +1829,6 @@
     </div>
 
 
-    <!-- DESKTOP MONITORING -->
-    <div class="settings-card">
-
-        <h2>🖥️ Desktop Monitoring</h2>
-
-        <div class="setting-row">
-
-            <div>
-                <strong>Desktop Monitoring</strong>
-                <p>Enable or disable automated desktop ping and monitoring</p>
-            </div>
-
-            <label class="switch">
-                <input type="checkbox" id="desktopMonitoringSetting" checked>
-                <span class="slider"></span>
-            </label>
-
-        </div>
-
-        <div class="setting-item">
-
-            <label>Desktop Check Interval</label>
-
-            <select id="desktopInterval">
-                <option value="5">5 Seconds</option>
-                <option value="10">10 Seconds</option>
-                <option value="30">30 Seconds</option>
-                <option value="60">1 Minute</option>
-                <option value="120">2 Minutes</option>
-                <option value="300">5 Minutes</option>
-                <option value="600">10 Minutes</option>
-                <option value="900">15 Minutes</option>
-                <option value="1800">30 Minutes</option>
-                <option value="3600">1 Hour</option>
-            </select>
-
-        </div>
-
-    </div>
-
-
     <!-- ALERT SETTINGS -->
     <div class="settings-card">
 
@@ -1899,7 +1843,7 @@
 
             <label class="switch">
 
-                <input type="checkbox" id="alert">
+                <input type="checkbox" id="alert" checked>
 
                 <span class="slider"></span>
 
@@ -1926,7 +1870,7 @@
             <div style="display:flex; align-items:center; gap:12px;">
                 <button type="button" class="btn secondary" style="padding:5px 12px; font-size:12px; border-radius:6px; cursor:pointer;" onclick="testSound()">▶ Test Sound</button>
                 <label class="switch">
-                    <input type="checkbox" id="soundNotification">
+                    <input type="checkbox" id="soundNotification" checked>
                     <span class="slider"></span>
                 </label>
             </div>

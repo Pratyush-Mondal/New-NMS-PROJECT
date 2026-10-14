@@ -1287,15 +1287,23 @@ def delete_desktop(
             )
 
             # Then enable selected location
-            cursor.execute(
-                """
-                UPDATE desktops
-                SET monitoring_enabled = 1
-                WHERE LOWER(TRIM(location))
-                    = LOWER(TRIM(%s))
-                """,
-                (selected_location,)
-            )
+            if selected_location and selected_location.strip().lower() in ["all", "all locations"]:
+                cursor.execute(
+                    """
+                    UPDATE desktops
+                    SET monitoring_enabled = 1
+                    """
+                )
+            else:
+                cursor.execute(
+                    """
+                    UPDATE desktops
+                    SET monitoring_enabled = 1
+                    WHERE LOWER(TRIM(location))
+                        = LOWER(TRIM(%s))
+                    """,
+                    (selected_location,)
+                )
 
         db.commit()
 
@@ -1619,29 +1627,14 @@ def update_desktop_monitoring_settings(
 
         if request.enabled:
 
-            if not selected_location or selected_location.strip().lower() in ('all', '', 'none'):
+            if not selected_location or selected_location.strip().lower() in ('all', '', 'none', 'all locations'):
                 # Enable ALL desktops
                 cursor.execute("""
                     UPDATE desktops
                     SET monitoring_enabled = 1
                 """)
-                selected_location = "ALL"
+                selected_location = "All Locations"
             else:
-                # Check whether location exists
-                cursor.execute("""
-                    SELECT COUNT(*) AS total
-                    FROM desktops
-                    WHERE LOWER(TRIM(location)) = LOWER(TRIM(%s))
-                """, (selected_location,))
-
-                location_result = cursor.fetchone()
-
-                if not location_result or location_result["total"] == 0:
-                    raise HTTPException(
-                        status_code=400,
-                        detail="No desktops found for the selected location."
-                    )
-
                 # First disable monitoring for ALL desktops
                 cursor.execute("""
                     UPDATE desktops
@@ -2050,7 +2043,7 @@ def ping_all_desktops_endpoint(credentials: HTTPAuthorizationCredentials = Depen
     cursor = None
     try:
         cursor = db.cursor(dictionary=True)
-        cursor.execute("SELECT id, desktop_code, department, location, ip_address, status, last_latency_ms, total_checks, successful_checks FROM desktops WHERE monitoring_enabled IS NULL OR monitoring_enabled = 1")
+        cursor.execute("SELECT id, desktop_code, department, location, ip_address, status, last_latency_ms, total_checks, successful_checks FROM desktops WHERE monitoring_enabled = 1")
         desktops = cursor.fetchall()
         cursor.close()
         db.close()
