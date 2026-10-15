@@ -57,8 +57,15 @@ def record_status_change_alert(db, cursor, source_type: str, code: str, name: st
         return None
 
 
-def sync_offline_alerts(cursor, db):
+_last_sync_offline_time = 0.0
+
+def sync_offline_alerts(cursor, db, force=False):
     """Ensure offline assets have an alert recorded without duplicating or resurrecting acknowledged/resolved ones."""
+    global _last_sync_offline_time
+    now_ts = time.time()
+    if not force and (now_ts - _last_sync_offline_time) < 15:
+        return
+    _last_sync_offline_time = now_ts
     try:
         # 1. Devices
         cursor.execute("SELECT device_code, device_name, status FROM devices WHERE status = 'Offline'")
@@ -365,7 +372,7 @@ def status_monitor_loop():
                     db.close()
                 except Exception:
                     pass
-        time.sleep(3)
+        time.sleep(15)
 
 threading.Thread(target=status_monitor_loop, daemon=True).start()
 

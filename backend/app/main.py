@@ -93,8 +93,8 @@ def execute_network_ping(ip_address: str, timeout_sec: float = 1.0) -> tuple[boo
             pass
             
     # 2. Socket-based connectivity probe (fallback for cloud/containers without ping binary or raw ICMP)
-    probe_ports = [80, 443, 554, 8000, 37777, 445, 135, 3389, 22]
-    sock_timeout = min(timeout_sec, 0.4)
+    probe_ports = [80, 554, 443, 8000]
+    sock_timeout = min(timeout_sec, 0.2)
     
     for port in probe_ports:
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -2715,12 +2715,16 @@ def ping_all_devices_endpoint(admin=Depends(get_current_admin)):
             if db_w:
                 cur_w = db_w.cursor()
                 dev_map = {d["id"]: d for d in devices}
+                update_params = [
+                    (r["status"], r["latency_ms"], r["last_check"], r["total_checks"], r["successful_checks"], r["uptime_percent"], r["last_check"], r["id"])
+                    for r in results
+                ]
+                cur_w.executemany("""
+                    UPDATE devices
+                    SET status = %s, last_latency_ms = %s, last_check = %s, total_checks = %s, successful_checks = %s, uptime_percent = %s, updated_at = %s
+                    WHERE id = %s
+                """, update_params)
                 for r in results:
-                    cur_w.execute("""
-                        UPDATE devices
-                        SET status = %s, last_latency_ms = %s, last_check = %s, total_checks = %s, successful_checks = %s, uptime_percent = %s, updated_at = %s
-                        WHERE id = %s
-                    """, (r["status"], r["latency_ms"], r["last_check"], r["total_checks"], r["successful_checks"], r["uptime_percent"], r["last_check"], r["id"]))
                     old_d = dev_map.get(r["id"])
                     old_st = old_d.get("status") if old_d else None
                     if old_st and old_st != r["status"]:
@@ -3278,12 +3282,16 @@ def ping_all_cameras_endpoint(credentials: HTTPAuthorizationCredentials = Depend
             if db_w:
                 cur_w = db_w.cursor()
                 cam_map = {c["id"]: c for c in cameras}
+                update_params = [
+                    (r["status"], r["latency_ms"], r["last_check"], r["total_checks"], r["successful_checks"], r["uptime_percent"], r["last_check"], r["id"])
+                    for r in results
+                ]
+                cur_w.executemany("""
+                    UPDATE cameras
+                    SET status = %s, last_latency_ms = %s, last_check = %s, total_checks = %s, successful_checks = %s, uptime_percent = %s, updated_at = %s
+                    WHERE id = %s
+                """, update_params)
                 for r in results:
-                    cur_w.execute("""
-                        UPDATE cameras
-                        SET status = %s, last_latency_ms = %s, last_check = %s, total_checks = %s, successful_checks = %s, uptime_percent = %s, updated_at = %s
-                        WHERE id = %s
-                    """, (r["status"], r["latency_ms"], r["last_check"], r["total_checks"], r["successful_checks"], r["uptime_percent"], r["last_check"], r["id"]))
                     old_c = cam_map.get(r["id"])
                     old_st = old_c.get("status") if old_c else None
                     if old_st and old_st != r["status"]:
