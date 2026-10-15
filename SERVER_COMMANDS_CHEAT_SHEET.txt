@@ -27,8 +27,7 @@ deactivate
 [2] SIR-ER WINDOWS SERVER-E UPDATE O RELOAD KORAR COMMANDS (CMD)
 --------------------------------------------------------------------------------
 1. সার্ভারের প্রজেক্ট ফোল্ডারে যান:
-cd /d "C:\NML Project\source"
-(অথবা প্রজেক্ট যেখানে আছে, যেমন cd /d "C:\NML Project")
+cd /d "C:\YourServerProjectFolder\NML PROJECT"
 
 2. গিটহাব থেকে নতুন কোড নিয়ে আসুন (Pull latest code):
 git pull origin main
@@ -41,8 +40,9 @@ pip install -r backend\requirements.txt
 
 5. সার্ভার রিস্টার্ট / রিলোড করুন:
 - রানিং সার্ভার উইন্ডোতে কীবোর্ডে চাপুন: Ctrl + C
-- তারপর চালু করুন:
-python run_local_nms.py
+- তারপর আবার চালু করুন:
+cd backend
+uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 
 ================================================================================
