@@ -71,14 +71,15 @@ def sync_offline_alerts(cursor, db, force=False):
         cursor.execute("SELECT device_code, device_name, status FROM devices WHERE status = 'Offline'")
         for d in cursor.fetchall():
             cursor.execute("""
-                SELECT id, status, message FROM alerts 
+                SELECT id, status, severity, message FROM alerts 
                 WHERE source_name = %s 
-                ORDER BY created_at DESC, id DESC 
+                  AND status IN ('New', 'Acknowledged')
+                  AND severity IN ('Critical', 'Warning')
                 LIMIT 1
             """, (d['device_code'],))
-            last_al = cursor.fetchone()
-            # Only create an alert if no alert exists at all, or if the last alert was an 'Online' / restored alert
-            if not last_al or "restored Online" in (last_al.get('message') or ''):
+            existing_active = cursor.fetchone()
+            if not existing_active:
+                cursor.execute("UPDATE alerts SET status = 'Resolved' WHERE source_name = %s AND status IN ('New', 'Acknowledged')", (d['device_code'],))
                 msg = f"Device {d['device_code']} ({d['device_name']}) went Offline"
                 cursor.execute("""
                     INSERT INTO alerts (source_type, source_name, message, severity, status, created_at)
@@ -93,13 +94,15 @@ def sync_offline_alerts(cursor, db, force=False):
         cursor.execute("SELECT camera_code, camera_name, status FROM cameras WHERE status = 'Offline'")
         for c in cursor.fetchall():
             cursor.execute("""
-                SELECT id, status, message FROM alerts 
+                SELECT id, status, severity, message FROM alerts 
                 WHERE source_name = %s 
-                ORDER BY created_at DESC, id DESC 
+                  AND status IN ('New', 'Acknowledged')
+                  AND severity IN ('Critical', 'Warning')
                 LIMIT 1
             """, (c['camera_code'],))
-            last_al = cursor.fetchone()
-            if not last_al or "restored Online" in (last_al.get('message') or ''):
+            existing_active = cursor.fetchone()
+            if not existing_active:
+                cursor.execute("UPDATE alerts SET status = 'Resolved' WHERE source_name = %s AND status IN ('New', 'Acknowledged')", (c['camera_code'],))
                 msg = f"Camera {c['camera_code']} ({c['camera_name']}) went Offline"
                 cursor.execute("""
                     INSERT INTO alerts (source_type, source_name, message, severity, status, created_at)
@@ -114,13 +117,15 @@ def sync_offline_alerts(cursor, db, force=False):
         cursor.execute("SELECT desktop_code, department, status FROM desktops WHERE status = 'Offline'")
         for dk in cursor.fetchall():
             cursor.execute("""
-                SELECT id, status, message FROM alerts 
+                SELECT id, status, severity, message FROM alerts 
                 WHERE source_name = %s 
-                ORDER BY created_at DESC, id DESC 
+                  AND status IN ('New', 'Acknowledged')
+                  AND severity IN ('Critical', 'Warning')
                 LIMIT 1
             """, (dk['desktop_code'],))
-            last_al = cursor.fetchone()
-            if not last_al or "restored Online" in (last_al.get('message') or ''):
+            existing_active = cursor.fetchone()
+            if not existing_active:
+                cursor.execute("UPDATE alerts SET status = 'Resolved' WHERE source_name = %s AND status IN ('New', 'Acknowledged')", (dk['desktop_code'],))
                 msg = f"Desktop {dk['desktop_code']} ({dk['department']}) went Offline"
                 cursor.execute("""
                     INSERT INTO alerts (source_type, source_name, message, severity, status, created_at)
@@ -131,14 +136,31 @@ def sync_offline_alerts(cursor, db, force=False):
                     VALUES ('Status Change', %s, %s, NOW())
                 """, (dk['desktop_code'], msg))
 
+        # 4. Auto-resolve any lingering offline alerts for assets that are now Online
+        cursor.execute("""
+            UPDATE alerts a
+            JOIN devices d ON a.source_name = d.device_code
+            SET a.status = 'Resolved'
+            WHERE d.status = 'Online' AND a.status IN ('New', 'Acknowledged') AND a.severity IN ('Critical', 'Warning')
+        """)
+        cursor.execute("""
+            UPDATE alerts a
+            JOIN cameras c ON a.source_name = c.camera_code
+            SET a.status = 'Resolved'
+            WHERE c.status = 'Online' AND a.status IN ('New', 'Acknowledged') AND a.severity IN ('Critical', 'Warning')
+        """)
+        cursor.execute("""
+            UPDATE alerts a
+            JOIN desktops dk ON a.source_name = dk.desktop_code
+            SET a.status = 'Resolved'
+            WHERE dk.status = 'Online' AND a.status IN ('New', 'Acknowledged') AND a.severity IN ('Critical', 'Warning')
+        """)
+
         # Deduplicate keeping the NEWEST alert (delete older duplicates with a1.id < a2.id)
         cursor.execute('''
             DELETE a1 FROM alerts a1
-            INNER JOIN alerts a2 
-            WHERE a1.id < a2.id 
-              AND a1.source_name = a2.source_name 
-              AND a1.status = 'New' 
-              AND a2.status = 'New'
+            JOIN alerts a2 ON a1.source_name = a2.source_name AND a1.id < a2.id
+            WHERE a1.status = 'New' AND a2.status = 'New'
         ''')
         if db:
             db.commit()
@@ -209,7 +231,7 @@ def get_alerts(status: str = None, admin=Depends(verify_admin)):
         if status:
             cursor.execute("SELECT * FROM alerts WHERE status = %s ORDER BY created_at DESC LIMIT 100", (status,))
         else:
-            cursor.execute("SELECT * FROM alerts ORDER BY CASE WHEN status = 'New' THEN 0 ELSE 1 END, created_at DESC LIMIT 100")
+            cursor.execute("SELECT * FROM alerts ORDER BY CASE WHEN status = 'New' THEN 0 WHEN status = 'Acknowledged' THEN 1 ELSE 2 END, created_at DESC LIMIT 100")
         return {"success": True, "alerts": cursor.fetchall()}
     finally:
         cursor.close()

@@ -116,12 +116,13 @@ def generate_report_data(conn, from_date_str: str = None, to_date_str: str = Non
 
     for alert in raw_alerts:
         msg = alert.get("message", "")
+        msg_lower = msg.lower()
         status = None
-        if "went Offline" in msg:
+        if "went offline" in msg_lower or "offline" in msg_lower:
             status = "Offline"
-        elif "went Online" in msg:
+        elif "restored online" in msg_lower or "went online" in msg_lower or "online" in msg_lower:
             status = "Online"
-        elif "went Warning" in msg:
+        elif "warning" in msg_lower:
             status = "Warning"
 
         if status and alert.get("source_name") in events_by_code:
@@ -136,11 +137,14 @@ def generate_report_data(conn, from_date_str: str = None, to_date_str: str = Non
     # Also incorporate logs if applicable
     for log in raw_logs:
         desc = log.get("description", "")
+        desc_lower = desc.lower()
         status = None
-        if "Offline" in desc:
+        if "went offline" in desc_lower or "offline" in desc_lower:
             status = "Offline"
-        elif "Online" in desc:
+        elif "restored online" in desc_lower or "went online" in desc_lower or "online" in desc_lower:
             status = "Online"
+        elif "warning" in desc_lower:
+            status = "Warning"
 
         if status and log.get("source_name") in events_by_code:
             events_by_code[log["source_name"]].append({
@@ -292,6 +296,8 @@ def generate_report_data(conn, from_date_str: str = None, to_date_str: str = Non
             "unknown_duration_sec": round(unknown_sec, 1),
             "online_duration_hms": format_seconds_to_hms(online_sec),
             "offline_duration_hms": format_seconds_to_hms(offline_sec),
+            "online_duration_readable": format_seconds_to_hms(online_sec),
+            "offline_duration_readable": format_seconds_to_hms(offline_sec),
             "online_duration_min": round(online_sec / 60.0, 1),
             "offline_duration_min": round(offline_sec / 60.0, 1),
             "online_events": online_events,
@@ -380,7 +386,9 @@ def generate_report_data(conn, from_date_str: str = None, to_date_str: str = Non
             "ip": a["ip"],
             "status": a["current_status"],
             "uptime": f"{a['availability_pct']}%",
-            "lastChecked": a["last_observed"]
+            "lastChecked": a["last_observed"],
+            "onlineDuration": a["online_duration_hms"],
+            "offlineDuration": a["offline_duration_hms"]
         })
 
     return {

@@ -4876,7 +4876,7 @@ function renderAnalyticsTable(data) {
     if (data.devices && Array.isArray(data.devices)) {
         data.devices.forEach(d => {
             allAssets.push({
-                id: d.id || d.code || "DEV",
+                id: d.code || d.id || "DEV",
                 name: d.name || "Device",
                 type: d.type || "Network Device",
                 category: "Device",
@@ -4884,8 +4884,8 @@ function renderAnalyticsTable(data) {
                 ip: d.ip || "N/A",
                 uptime: (d.availability_pct != null ? d.availability_pct : (d.uptime_percent_db || "100.00")) + "%",
                 lastChecked: d.last_status_change || d.last_observed || "Recent",
-                onlineDuration: d.online_duration_readable || "N/A",
-                offlineDuration: d.offline_duration_readable || "N/A",
+                onlineDuration: d.online_duration_readable || d.online_duration_hms || "00:00:00",
+                offlineDuration: d.offline_duration_readable || d.offline_duration_hms || "00:00:00",
                 coverageNote: d.coverage_note || ""
             });
         });
@@ -4895,7 +4895,7 @@ function renderAnalyticsTable(data) {
     if (data.cameras && Array.isArray(data.cameras)) {
         data.cameras.forEach(c => {
             allAssets.push({
-                id: c.id || c.code || "CAM",
+                id: c.code || c.id || "CAM",
                 name: c.name || "CCTV Camera",
                 type: "CCTV Camera",
                 category: "CCTV Camera",
@@ -4903,8 +4903,8 @@ function renderAnalyticsTable(data) {
                 ip: c.ip || "N/A",
                 uptime: (c.availability_pct != null ? c.availability_pct : "100.00") + "%",
                 lastChecked: c.last_status_change || c.last_observed || "Recent",
-                onlineDuration: c.online_duration_readable || "N/A",
-                offlineDuration: c.offline_duration_readable || "N/A",
+                onlineDuration: c.online_duration_readable || c.online_duration_hms || "00:00:00",
+                offlineDuration: c.offline_duration_readable || c.offline_duration_hms || "00:00:00",
                 coverageNote: c.coverage_note || ""
             });
         });
@@ -4914,7 +4914,7 @@ function renderAnalyticsTable(data) {
     if (data.desktops && Array.isArray(data.desktops)) {
         data.desktops.forEach(d => {
             allAssets.push({
-                id: d.id || d.code || "DSK",
+                id: d.code || d.id || "DSK",
                 name: d.name || "Desktop",
                 type: d.type || "Desktop Workstation",
                 category: "Desktop",
@@ -4922,8 +4922,8 @@ function renderAnalyticsTable(data) {
                 ip: d.ip || "N/A",
                 uptime: (d.availability_pct != null ? d.availability_pct : "100.00") + "%",
                 lastChecked: d.last_status_change || d.last_observed || "Recent",
-                onlineDuration: d.online_duration_readable || "N/A",
-                offlineDuration: d.offline_duration_readable || "N/A",
+                onlineDuration: d.online_duration_readable || d.online_duration_hms || "00:00:00",
+                offlineDuration: d.offline_duration_readable || d.offline_duration_hms || "00:00:00",
                 coverageNote: d.coverage_note || ""
             });
         });
