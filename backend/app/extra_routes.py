@@ -23,6 +23,11 @@ def record_status_change_alert(db, cursor, source_type: str, code: str, name: st
         return None
     try:
         now_dt = datetime.now()
+        # Always resolve previous active/acknowledged alerts for this asset before recording new transition
+        cursor.execute("""
+            UPDATE alerts SET status = 'Resolved' WHERE source_name = %s AND status IN ('New', 'Acknowledged')
+        """, (code,))
+
         if new_status == "Offline":
             sev = "Critical" if source_type == "Device" else "Warning"
             msg = f"{source_type} {code} ({name}) went Offline"
@@ -35,10 +40,6 @@ def record_status_change_alert(db, cursor, source_type: str, code: str, name: st
                 VALUES ('Status Change', %s, %s, %s)
             """, (code, msg, now_dt))
         elif new_status == "Online":
-            # Auto-resolve previous 'New' alerts for this asset
-            cursor.execute("""
-                UPDATE alerts SET status = 'Resolved' WHERE source_name = %s AND status = 'New'
-            """, (code,))
             msg = f"{source_type} {code} ({name}) restored Online"
             cursor.execute("""
                 INSERT INTO alerts (source_type, source_name, message, severity, status, created_at)
@@ -57,13 +58,20 @@ def record_status_change_alert(db, cursor, source_type: str, code: str, name: st
 
 
 def sync_offline_alerts(cursor, db):
-    """Ensure every currently offline asset has an active alert in alerts table."""
+    """Ensure offline assets have an alert recorded without duplicating or resurrecting acknowledged/resolved ones."""
     try:
         # 1. Devices
         cursor.execute("SELECT device_code, device_name, status FROM devices WHERE status = 'Offline'")
         for d in cursor.fetchall():
-            cursor.execute("SELECT id FROM alerts WHERE source_name = %s AND status = 'New' LIMIT 1", (d['device_code'],))
-            if not cursor.fetchone():
+            cursor.execute("""
+                SELECT id, status, message FROM alerts 
+                WHERE source_name = %s 
+                ORDER BY created_at DESC, id DESC 
+                LIMIT 1
+            """, (d['device_code'],))
+            last_al = cursor.fetchone()
+            # Only create an alert if no alert exists at all, or if the last alert was an 'Online' / restored alert
+            if not last_al or "restored Online" in (last_al.get('message') or ''):
                 msg = f"Device {d['device_code']} ({d['device_name']}) went Offline"
                 cursor.execute("""
                     INSERT INTO alerts (source_type, source_name, message, severity, status, created_at)
@@ -77,8 +85,14 @@ def sync_offline_alerts(cursor, db):
         # 2. Cameras
         cursor.execute("SELECT camera_code, camera_name, status FROM cameras WHERE status = 'Offline'")
         for c in cursor.fetchall():
-            cursor.execute("SELECT id FROM alerts WHERE source_name = %s AND status = 'New' LIMIT 1", (c['camera_code'],))
-            if not cursor.fetchone():
+            cursor.execute("""
+                SELECT id, status, message FROM alerts 
+                WHERE source_name = %s 
+                ORDER BY created_at DESC, id DESC 
+                LIMIT 1
+            """, (c['camera_code'],))
+            last_al = cursor.fetchone()
+            if not last_al or "restored Online" in (last_al.get('message') or ''):
                 msg = f"Camera {c['camera_code']} ({c['camera_name']}) went Offline"
                 cursor.execute("""
                     INSERT INTO alerts (source_type, source_name, message, severity, status, created_at)
@@ -92,8 +106,14 @@ def sync_offline_alerts(cursor, db):
         # 3. Desktops
         cursor.execute("SELECT desktop_code, department, status FROM desktops WHERE status = 'Offline'")
         for dk in cursor.fetchall():
-            cursor.execute("SELECT id FROM alerts WHERE source_name = %s AND status = 'New' LIMIT 1", (dk['desktop_code'],))
-            if not cursor.fetchone():
+            cursor.execute("""
+                SELECT id, status, message FROM alerts 
+                WHERE source_name = %s 
+                ORDER BY created_at DESC, id DESC 
+                LIMIT 1
+            """, (dk['desktop_code'],))
+            last_al = cursor.fetchone()
+            if not last_al or "restored Online" in (last_al.get('message') or ''):
                 msg = f"Desktop {dk['desktop_code']} ({dk['department']}) went Offline"
                 cursor.execute("""
                     INSERT INTO alerts (source_type, source_name, message, severity, status, created_at)
@@ -104,10 +124,11 @@ def sync_offline_alerts(cursor, db):
                     VALUES ('Status Change', %s, %s, NOW())
                 """, (dk['desktop_code'], msg))
 
+        # Deduplicate keeping the NEWEST alert (delete older duplicates with a1.id < a2.id)
         cursor.execute('''
             DELETE a1 FROM alerts a1
             INNER JOIN alerts a2 
-            WHERE a1.id > a2.id 
+            WHERE a1.id < a2.id 
               AND a1.source_name = a2.source_name 
               AND a1.status = 'New' 
               AND a2.status = 'New'
@@ -194,7 +215,20 @@ def ack_alerts(admin=Depends(verify_admin)):
     try:
         cursor.execute("UPDATE alerts SET status='Acknowledged' WHERE status='New'")
         db.commit()
-        return {"success": True}
+        return {"success": True, "message": "All active alerts acknowledged"}
+    finally:
+        cursor.close()
+        db.close()
+
+@router.post("/api/alerts/clear")
+@router.delete("/api/alerts")
+def clear_all_alerts(admin=Depends(verify_admin)):
+    db = get_db_connection()
+    cursor = db.cursor()
+    try:
+        cursor.execute("UPDATE alerts SET status='Resolved' WHERE status IN ('New', 'Acknowledged')")
+        db.commit()
+        return {"success": True, "message": "All alerts cleared"}
     finally:
         cursor.close()
         db.close()
@@ -458,17 +492,8 @@ def get_admin_overview(admin=Depends(verify_admin)):
         cursor.execute("SELECT COUNT(*) as c FROM desktops")
         desk_c = cursor.fetchone()["c"]
 
-        # 3. Recent activity from alerts
-        cursor.execute("""
-            SELECT id, source_type, source_name, message, severity, created_at
-            FROM alerts
-            ORDER BY created_at DESC
-            LIMIT 6
-        """)
-        recent_activity = cursor.fetchall()
-        for a in recent_activity:
-            if isinstance(a.get("created_at"), datetime):
-                a["created_at"] = a["created_at"].strftime("%Y-%m-%d %H:%M:%S")
+        # 3. Recent activity removed per user request
+        recent_activity = []
 
         return {
             "success": True,
@@ -638,4 +663,75 @@ def delete_administrator(admin_id: int, admin=Depends(verify_admin)):
     finally:
         cursor.close()
         db.close()
+
+
+class AlertSimulateRequest(BaseModel):
+    asset_type: str | None = None
+    target_status: str | None = None
+
+
+@router.post("/api/alerts/simulate")
+def simulate_status_alert(data: AlertSimulateRequest | None = None, admin=Depends(verify_admin)):
+    """Simulates a live Online <-> Offline status transition on an asset and records an alert."""
+    db = get_db_connection()
+    if not db:
+        raise HTTPException(status_code=500, detail="Database connection failed")
+    cursor = db.cursor(dictionary=True)
+    try:
+        req_type = data.asset_type.lower() if (data and data.asset_type) else None
+        target_st = data.target_status if (data and data.target_status) else None
+
+        table_specs = [
+            ('devices', 'Device', 'device_code', 'device_name', 'dev_'),
+            ('cameras', 'Camera', 'camera_code', 'camera_name', 'cam_'),
+            ('desktops', 'Desktop', 'desktop_code', 'department', 'desk_')
+        ]
+        if req_type:
+            table_specs = [t for t in table_specs if t[1].lower() == req_type]
+            if not table_specs:
+                raise HTTPException(status_code=400, detail="Invalid asset_type. Must be Device, Camera, or Desktop.")
+
+        chosen = None
+        chosen_spec = None
+        for tbl, stype, c_col, n_col, pfx in table_specs:
+            cursor.execute(f"SELECT id, {c_col} as code, {n_col} as name, status FROM {tbl} ORDER BY RAND() LIMIT 1")
+            row = cursor.fetchone()
+            if row:
+                chosen = row
+                chosen_spec = (tbl, stype, c_col, n_col, pfx)
+                break
+
+        if not chosen:
+            raise HTTPException(status_code=404, detail="No assets available to simulate.")
+
+        tbl, stype, c_col, n_col, pfx = chosen_spec
+        old_status = chosen['status'] or 'Online'
+        if target_st in ('Online', 'Offline'):
+            new_status = target_st
+        else:
+            new_status = 'Offline' if old_status == 'Online' else 'Online'
+
+        now = datetime.now()
+        cursor.execute(f"UPDATE {tbl} SET status = %s, updated_at = %s WHERE id = %s", (new_status, now, chosen['id']))
+        msg = record_status_change_alert(db, cursor, stype, chosen['code'], chosen['name'], old_status, new_status)
+        db.commit()
+
+        # Update cache so monitor loop tracks the new state
+        key = f"{pfx}{chosen['id']}"
+        last_status[key] = new_status
+
+        return {
+            "success": True,
+            "asset_type": stype,
+            "id": chosen['id'],
+            "code": chosen['code'],
+            "name": chosen['name'],
+            "old_status": old_status,
+            "new_status": new_status,
+            "message": msg or f"{stype} {chosen['code']} ({chosen['name']}) is now {new_status}"
+        }
+    finally:
+        cursor.close()
+        db.close()
+
 

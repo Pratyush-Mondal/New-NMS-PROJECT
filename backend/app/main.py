@@ -1740,7 +1740,7 @@ def update_desktop(
 
         cursor.execute(
             """
-            SELECT id
+            SELECT id, desktop_code, department, status
             FROM desktops
             WHERE id = %s
             LIMIT 1
@@ -1826,6 +1826,9 @@ def update_desktop(
         """
 
         cursor.execute(query, tuple(values))
+
+        if "status" in update_data and existing.get("status") and existing.get("status") != update_data["status"]:
+            record_status_change_alert(None, cursor, "Desktop", existing["desktop_code"], existing.get("department", "Desktop"), existing.get("status"), update_data["status"])
 
         db.commit()
 
@@ -2024,6 +2027,51 @@ def ping_desktop(
             status_code=500,
             detail=str(error)
         )
+    finally:
+        if cursor:
+            cursor.close()
+        if db:
+            db.close()
+
+
+# ==========================================
+# DESKTOP - TOGGLE STATUS & UPDATE
+# ==========================================
+
+@app.put("/api/desktops/{desktop_id}/toggle-status")
+def toggle_desktop_status(
+    desktop_id: int,
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    token = credentials.credentials
+    admin = get_admin_from_token(token)
+    if admin is None:
+        raise HTTPException(status_code=401, detail="Invalid or expired token.")
+    db = get_db_connection()
+    if not db:
+        raise HTTPException(status_code=500, detail="Database connection failed")
+    cursor = None
+    try:
+        cursor = db.cursor(dictionary=True)
+        cursor.execute("SELECT id, desktop_code, department, status FROM desktops WHERE id = %s LIMIT 1", (desktop_id,))
+        desktop = cursor.fetchone()
+        if not desktop:
+            raise HTTPException(status_code=404, detail="Desktop not found")
+        old_status = desktop.get("status") or "Online"
+        new_status = "Offline" if old_status == "Online" else "Online"
+        now = datetime.now()
+        cursor.execute("UPDATE desktops SET status = %s, updated_at = %s WHERE id = %s", (new_status, now, desktop_id))
+        msg = record_status_change_alert(db, cursor, "Desktop", desktop["desktop_code"], desktop.get("department", "Desktop"), old_status, new_status)
+        db.commit()
+        return {
+            "success": True,
+            "desktop_id": desktop_id,
+            "desktop_code": desktop["desktop_code"],
+            "department": desktop.get("department", "Desktop"),
+            "old_status": old_status,
+            "status": new_status,
+            "message": msg or f"Desktop {desktop['desktop_code']} is now {new_status}"
+        }
     finally:
         if cursor:
             cursor.close()
@@ -2575,6 +2623,46 @@ def ping_device(
         db.close()
 
 
+# ==========================================
+# DEVICE - TOGGLE STATUS
+# ==========================================
+
+@app.put("/api/devices/{device_id}/toggle-status")
+def toggle_device_status(
+    device_id: int,
+    admin=Depends(get_current_admin)
+):
+    db = get_db_connection()
+    if not db:
+        raise HTTPException(status_code=500, detail="Database connection failed")
+    cursor = None
+    try:
+        cursor = db.cursor(dictionary=True)
+        cursor.execute("SELECT id, device_code, device_name, status FROM devices WHERE id = %s LIMIT 1", (device_id,))
+        device = cursor.fetchone()
+        if not device:
+            raise HTTPException(status_code=404, detail="Device not found")
+        old_status = device.get("status") or "Online"
+        new_status = "Offline" if old_status == "Online" else "Online"
+        now = datetime.now()
+        cursor.execute("UPDATE devices SET status = %s, updated_at = %s WHERE id = %s", (new_status, now, device_id))
+        msg = record_status_change_alert(db, cursor, "Device", device["device_code"], device["device_name"], old_status, new_status)
+        db.commit()
+        return {
+            "success": True,
+            "device_id": device_id,
+            "device_code": device["device_code"],
+            "device_name": device["device_name"],
+            "old_status": old_status,
+            "status": new_status,
+            "message": msg or f"Device {device['device_code']} is now {new_status}"
+        }
+    finally:
+        if cursor:
+            cursor.close()
+        db.close()
+
+
 @app.post("/api/devices/ping-all")
 def ping_all_devices_endpoint(admin=Depends(get_current_admin)):
     db = get_db_connection()
@@ -3090,6 +3178,46 @@ def ping_camera(
         if cursor:
             cursor.close()
 
+        db.close()
+
+
+# ==========================================
+# CAMERA - TOGGLE STATUS
+# ==========================================
+
+@app.put("/api/cameras/{camera_id}/toggle-status")
+def toggle_camera_status(
+    camera_id: int,
+    admin=Depends(get_current_admin)
+):
+    db = get_db_connection()
+    if not db:
+        raise HTTPException(status_code=500, detail="Database connection failed")
+    cursor = None
+    try:
+        cursor = db.cursor(dictionary=True)
+        cursor.execute("SELECT id, camera_code, camera_name, status FROM cameras WHERE id = %s LIMIT 1", (camera_id,))
+        camera = cursor.fetchone()
+        if not camera:
+            raise HTTPException(status_code=404, detail="Camera not found")
+        old_status = camera.get("status") or "Online"
+        new_status = "Offline" if old_status == "Online" else "Online"
+        now = datetime.now()
+        cursor.execute("UPDATE cameras SET status = %s, updated_at = %s WHERE id = %s", (new_status, now, camera_id))
+        msg = record_status_change_alert(db, cursor, "Camera", camera["camera_code"], camera["camera_name"], old_status, new_status)
+        db.commit()
+        return {
+            "success": True,
+            "camera_id": camera_id,
+            "camera_code": camera["camera_code"],
+            "camera_name": camera["camera_name"],
+            "old_status": old_status,
+            "status": new_status,
+            "message": msg or f"Camera {camera['camera_code']} is now {new_status}"
+        }
+    finally:
+        if cursor:
+            cursor.close()
         db.close()
 
 

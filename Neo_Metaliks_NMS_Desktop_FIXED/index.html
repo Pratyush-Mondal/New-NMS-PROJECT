@@ -1,13 +1,2111 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta http-equiv="refresh" content="0; url=./Neo_Metaliks_NMS_CCTV_Device_Ready/login.html">
-  <title>Neo Metaliks | NMS Control Center</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Neo Metaliks | NMS Control Center</title>
+<link rel="icon" type="image/png" href="assets/images/neo-metaliks-logo.png">
+<link rel="stylesheet" href="style.css?v=12">
+<script src="config.js"></script>
+<script>
+(async function checkAuthentication() {
+
+    const token = localStorage.getItem("access_token");
+
+    if (!token) {
+        window.location.href = "login.html";
+        return;
+    }
+
+    function resolveApi() {
+        if (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL !== undefined && window.APP_CONFIG.API_BASE_URL !== null) {
+            return window.APP_CONFIG.API_BASE_URL;
+        }
+        if (window.location.protocol === "file:") {
+            return "http://127.0.0.1:8000";
+        }
+        if (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") {
+            return window.location.port === "8081" ? "" : "http://" + window.location.hostname + ":8000";
+        }
+        if (window.location.hostname.includes("onrender.com")) {
+            return "";
+        }
+        if (window.location.hostname.includes("vercel.app") || window.location.protocol === "https:") {
+            return "https://neo-metaliks-nms.onrender.com";
+        }
+        return "";
+    }
+
+    try {
+        const apiBase = resolveApi();
+        const response = await fetch(
+            apiBase + "/api/auth/me",
+            {
+                method: "GET",
+                headers: {
+                    "Authorization": "Bearer " + token
+                }
+            }
+        );
+
+        if (response.status === 401 || response.status === 403) {
+            console.warn("Session expired or token invalid.");
+            localStorage.removeItem("access_token");
+            localStorage.removeItem("adminLoggedIn");
+            localStorage.removeItem("loggedIn");
+            window.location.href = "login.html";
+            return;
+        }
+
+        if (!response.ok) {
+            console.warn("Backend auth verification warning (HTTP " + response.status + "). Retaining cached session.");
+            return;
+        }
+
+        const data = await response.json();
+
+        if (data.success && data.admin) {
+            localStorage.setItem("admin_id", data.admin.id);
+            localStorage.setItem("admin_name", data.admin.name);
+            localStorage.setItem("admin_email", data.admin.email);
+            localStorage.setItem("admin_phone", data.admin.phone || "");
+            localStorage.setItem("admin_department", data.admin.department || "");
+            localStorage.setItem("admin_location", data.admin.location || "");
+            if (data.admin.profile_image) {
+                localStorage.setItem("admin_profile_image", data.admin.profile_image);
+            }
+            console.log("NMS Authentication verified.");
+        }
+
+    } catch (error) {
+        console.warn("Auth check network glitch:", error);
+    }
+
+})();
+</script>
 </head>
 <body>
-  <script>
-    window.location.replace("./Neo_Metaliks_NMS_CCTV_Device_Ready/login.html");
-  </script>
+<div class="app">
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <div class="logo">
+        <img src="assets/images/neo-metaliks-logo.png" alt="Neo Metaliks Logo" class="brand-logo-img">
+      </div>
+      <div><b>NEO METALIKS</b><small>NMS CONTROL CENTER</small></div>
+    </div>
+    <div class="nav-title">MAIN</div>
+    <nav>
+      <a href="#dashboard" class="nav active" data-page="dashboard"><span>⌂</span>Dashboard</a>
+      <a href="#devices" class="nav" data-page="devices"><span>◈</span>Devices <em id="sidebarDevicesCount">0</em></a>
+      <a href="#cameras" class="nav" data-page="cameras"><span>▣</span>CCTV Cameras <em id="sidebarCamerasCount">0</em></a>
+      <!-- ADD THIS -->
+      <a href="#network" class="nav" data-page="network">
+          <span>⌁</span>Network Map </a>
+         <a href="#desktops" class="nav" data-page="desktops">
+          <span>🖥️</span>Desktop Management
+      </a>
+      <div class="nav-title">OPERATIONS</div>
+      <a href="#alerts" class="nav" data-page="alerts"><span>⚠</span>Alerts <em class="danger-badge" id="sidebarAlertsCount">0</em></a>
+       <a href="#reports" class="nav" data-page="reports"><span>▥</span>Reports</a>
+      <div class="nav-title">SYSTEM</div>
+      <a href="#settings" class="nav" data-page="settings"><span>⚙</span>Settings</a>
+      <a href="#admin-panel" class="nav" data-page="admin-panel"><span>🛡️</span>Admin Panel</a>
+    </nav>
+    <div class="side-bottom">
+      <span class="online-dot"></span>
+      <div><b>Monitoring Online</b><small>All services operational</small></div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div class="top-left">
+        <button class="menu" id="menuBtn">☰</button>
+        <div><span class="crumb">NEO METALIKS / NMS</span><h1 id="pageHeading">Network Monitoring Dashboard</h1></div>
+      </div>
+      <div class="top-right">
+        <div class="live"><i></i> LIVE</div>
+        <div class="clock" id="clock">00:00:00</div>
+        <button type="button" class="btn" style="background:rgba(239,68,68,0.18);border:1px solid #ef4444;color:#fca5a5;padding:4px 10px;font-size:12px;border-radius:6px;cursor:pointer;display:inline-flex;align-items:center;gap:4px;font-weight:600;" onclick="simulateQuickAlert()" title="Test Instant Alert Chime & Badge">⚡ Test Alert</button>
+        <button class="bell" onclick="document.querySelector('[data-page=&quot;alerts&quot;]').click()">♢<sup id="headerAlertsCount">0</sup></button>
+       <div class="user-profile" id="adminButton">
+    <div class="admin-avatar">A</div>
+
+    <div class="admin-info">
+        <strong>Administrator</strong>
+        <small>System Admin</small>
+    </div>
+
+    <span class="admin-arrow">▼</span>
+</div>
+
+<div class="admin-menu" id="adminMenu">
+    <div class="admin-menu-header">
+        <div class="admin-large-avatar">A</div>
+        <div>
+            <strong>Administrator</strong>
+            <small>System Admin</small>
+        </div>
+    </div>
+
+    <button type="button" class="admin-menu-item" onclick="openAdminPanel()">
+        🛡️ <span>Admin Panel</span>
+    </button>
+
+    <button type="button" class="admin-menu-item" onclick="openAdminProfile()">
+        👤 <span>Admin Profile</span>
+    </button>
+
+    <button type="button" class="admin-menu-item" onclick="openAdminSettings()">
+        ⚙️ <span>Admin Settings</span>
+    </button>
+
+    
+
+    <button type="button" class="admin-menu-item logout-item" onclick="adminLogout()">
+        🚪 <span>Logout</span>
+    </button>
+</div>
+      </div>
+    </header>
+    <div class="pages">
+
+      <!-- ADMINISTRATOR PROFILE -->
+      <section class="page" id="admin-profile-page">
+
+    <!-- Breadcrumb -->
+
+    <div class="profile-breadcrumb">
+
+        <span>⌂</span>
+
+        <span>›</span>
+
+        <span>Administrator</span>
+
+        <span>›</span>
+
+        <strong>Profile</strong>
+
+    </div>
+
+
+    <!-- Page Heading -->
+
+    <div class="profile-page-heading">
+
+        <h1>Administrator Profile</h1>
+
+        <p>
+            Manage your administrator information and settings
+        </p>
+
+    </div>
+
+
+    <!-- Profile Layout -->
+
+    <div class="administrator-profile-layout">
+
+
+        <!-- =====================================
+             LEFT PROFILE CARD
+        ====================================== -->
+
+        <div class="administrator-card">
+
+            <div class="profile-avatar-large"
+                 id="profileAvatarLarge">
+
+                A
+
+            </div>
+
+
+            <h2 id="profileDisplayName">
+                Administrator
+            </h2>
+
+            <p class="profile-role">
+                System Admin
+            </p>
+
+
+            <div class="profile-status">
+
+                <span></span>
+
+                Active
+
+            </div>
+
+
+            <div class="profile-divider"></div>
+
+
+            <!-- Details -->
+
+            <div class="profile-detail">
+
+                <span class="detail-icon">👤</span>
+
+                <div>
+
+                    <small>Full Name</small>
+
+                    <strong id="displayFullName">
+                        Administrator
+                    </strong>
+
+                </div>
+
+            </div>
+
+
+            <div class="profile-detail">
+
+                <span class="detail-icon">✉</span>
+
+                <div>
+
+                    <small>Email</small>
+
+                    <strong id="displayEmail">
+                        admin@neometaliks.com
+                    </strong>
+
+                </div>
+
+            </div>
+
+
+            <div class="profile-detail">
+
+                <span class="detail-icon">☎</span>
+
+                <div>
+
+                    <small>Phone</small>
+
+                    <strong id="displayPhone">
+                        +91 9876543210
+                    </strong>
+
+                </div>
+
+            </div>
+
+
+            <div class="profile-detail">
+
+                <span class="detail-icon">🛡</span>
+
+                <div>
+
+                    <small>Role</small>
+
+                    <strong>
+                        System Admin
+                    </strong>
+
+                </div>
+
+            </div>
+
+
+            <div class="profile-detail">
+
+                <span class="detail-icon">🏢</span>
+
+                <div>
+
+                    <small>Department</small>
+
+                    <strong id="displayDepartment">
+                        IT & Network
+                    </strong>
+
+                </div>
+
+            </div>
+
+
+            <div class="profile-detail">
+
+                <span class="detail-icon">📍</span>
+
+                <div>
+
+                    <small>Location</small>
+
+                    <strong id="displayLocation">
+                        Neo Metaliks
+                    </strong>
+
+                </div>
+
+            </div>
+
+
+            <div class="profile-card-footer">
+
+                <strong>Neo Metaliks NMS</strong>
+
+                <span>
+                    Secure • Monitor • Manage
+                </span>
+
+            </div>
+
+        </div>
+
+
+
+        <!-- =====================================
+             RIGHT EDIT PROFILE
+        ====================================== -->
+
+        <div class="edit-profile-card">
+
+            <div class="edit-profile-heading">
+
+                <h2>Edit Profile</h2>
+
+                <p>
+                    Update your personal information and profile details
+                </p>
+
+            </div>
+
+
+            <!-- Photo Upload -->
+
+            <div class="profile-upload-area">
+
+                <div class="profile-avatar-edit"
+                     id="editProfileAvatar">
+
+                    A
+
+                </div>
+
+
+                <div class="photo-upload-box"
+                     onclick="document.getElementById('profileImageInput').click()">
+
+                    <div class="upload-icon">
+                        ↑
+                    </div>
+
+                    <strong>
+                        Change Profile Photo
+                    </strong>
+
+                    <span>
+                        Click to upload or drag and drop
+                    </span>
+
+                    <small>
+                        JPG, PNG - Max 2MB
+                    </small>
+
+                </div>
+
+            </div>
+
+
+            <input
+                type="file"
+                id="profileImageInput"
+                accept="image/png,image/jpeg"
+                hidden
+            >
+
+
+            <!-- Form -->
+
+            <form id="adminProfileForm">
+
+                <div class="profile-form-grid">
+
+
+                    <!-- Full Name -->
+
+                    <div class="profile-form-group">
+
+                        <label>
+                            👤 Full Name
+                            <span>*</span>
+                        </label>
+
+                        <input
+                            type="text"
+                            id="adminName"
+                            value="Administrator"
+                            required
+                        >
+
+                    </div>
+
+
+                    <!-- Email -->
+
+                    <div class="profile-form-group">
+
+                        <label>
+                            ✉ Email Address
+                            <span>*</span>
+                        </label>
+
+                        <input
+                            type="email"
+                            id="adminEmail"
+                            value="admin@neometaliks.com"
+                            required
+                        >
+
+                    </div>
+
+
+                    <!-- Phone -->
+
+                    <div class="profile-form-group">
+
+                        <label>
+                            ☎ Phone Number
+                            <span>*</span>
+                        </label>
+
+                        <input
+                            type="tel"
+                            id="adminPhone"
+                            value="+91 9876543210"
+                            required
+                        >
+
+                    </div>
+
+
+                    <!-- Role -->
+
+                    <div class="profile-form-group">
+
+                        <label>
+                            🛡 Role
+                        </label>
+
+                        <input
+                            type="text"
+                            value="System Admin"
+                            readonly
+                        >
+
+                    </div>
+
+
+                    <!-- Department -->
+
+                    <div class="profile-form-group">
+
+                        <label>
+                            🏢 Department
+                        </label>
+
+                        <input
+                            type="text"
+                            id="adminDepartment"
+                            value="IT & Network"
+                        >
+
+                    </div>
+
+
+                    <!-- Location -->
+
+                    <div class="profile-form-group">
+
+                        <label>
+                            📍 Location
+                        </label>
+
+                        <input
+                            type="text"
+                            id="adminLocation"
+                            value="Neo Metaliks"
+                        >
+
+                    </div>
+
+                </div>
+
+
+                <!-- Buttons -->
+
+                <div class="profile-form-actions">
+
+                    <button
+                        type="button"
+                        class="profile-cancel-btn"
+                        onclick="cancelProfileEdit()">
+
+                        ✕
+                        Cancel
+
+                    </button>
+
+
+                    <button
+                        type="submit"
+                        class="profile-save-btn">
+
+                        💾
+                        Save Changes
+
+                    </button>
+
+                </div>
+
+            </form>
+
+        </div>
+
+    </div>
+
+</section>
+
+      <!-- DASHBOARD -->
+      <section class="page active" id="dashboard">
+        <div class="hero">
+          <div><span class="tag">● REAL-TIME INFRASTRUCTURE MONITORING</span>
+          <h2 id="dashboardGreeting">Good morning, Administrator.</h2>
+          <p>Monitor Neo Metaliks' complete IT and security infrastructure from one powerful control center.</p></div>
+          <button class="btn primary" id="dashboardRefreshBtn" type="button" onclick="refreshAll()">↻ Refresh Data</button>
+        </div>
+        <div class="stats">
+          <div class="stat"><div class="stat-icon blue">◈</div><div><small>Total Devices</small><strong id="dashTotal">N/A</strong><span class="positive">▲ 2 online today</span></div></div>
+          <div class="stat"><div class="stat-icon green">✓</div><div><small>Online Devices</small><strong id="dashOnline">N/A</strong><span class="positive">91.7% availability</span></div></div>
+          <div class="stat"><div class="stat-icon red">⚠</div><div><small>Active Alerts</small><strong id="dashAlerts">N/A</strong><span class="negative">Needs attention</span></div></div>
+        </div>
+        <div class="grid two">
+          <div class="card chart-card">
+            <div class="card-head"><div><h3>Network Traffic</h3><p>Bandwidth utilization — last 60 minutes</p></div><span class="status good">● Healthy</span></div>
+            <canvas id="chart"></canvas>
+          </div>
+          <div class="card">
+            <div class="card-head"><div><h3>Infrastructure Health</h3><p>Current device status</p></div></div>
+            <div class="health" id="dashHealthList"><div><span>▣ CCTV Cameras</span><b>24 / 24</b></div><div><span>⌁ Network Switches</span><b>10 / 11</b></div><div><span>▤ Servers</span><b>6 / 6</b></div><div><span>◈ Access Points</span><b class="amber">4 / 7</b></div></div>
+            <div class="availability"><div><span>Overall availability</span><b>91.7%</b></div><div class="bar"><i style="width:91.7%"></i></div></div>
+          </div>
+        </div>
+        <div class="grid two">
+          <div class="card">
+            <div class="card-head"><div><h3>Recent Alerts</h3><p>Events requiring attention</p></div><button class="link" onclick="openPage('alerts')">View all →</button></div>
+            <div class="alerts" id="dashAlertsList">
+              <div class="alert critical"><i>!</i><div><b>Switch SW-07 unreachable</b><small>Production Block · 8 min ago</small></div><label>Critical</label></div>
+              <div class="alert warning"><i>!</i><div><b>Camera CAM-18 high latency</b><small>Gate-2 · 14 min ago</small></div><label>Warning</label></div>
+              <div class="alert info"><i>i</i><div><b>Server SRV-02 CPU above 80%</b><small>Data Center · 21 min ago</small></div><label>Info</label></div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-head"><div><h3>Quick Access</h3><p>Open monitoring modules</p></div></div>
+            <div class="quick" style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
+                <button onclick="openPage('cameras')"><strong>&#128249;</strong><b>CCTV Wall</b><small id="dashQuickCCTV">...</small></button>
+                <button onclick="openPage('network')"><strong>&#127760;</strong><b>Network Map</b><small id="dashQuickNetwork">...</small></button>
+                <button onclick="openPage('devices')"><strong>&#128421;</strong><b>Devices</b><small id="dashQuickDevices">...</small></button>
+                <button onclick="openPage('desktops')"><strong>&#128187;</strong><b>Desktops</b><small id="dashQuickDesktops">...</small></button>
+              </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- DEVICES -->
+      <section class="page" id="devices">
+        <div class="page-top">
+          <div><span class="crumb">MONITORING</span><h2>Device Inventory</h2><p>Network switches, routers, access points and infrastructure devices.</p></div>
+         <div class="nms-page-actions">
+
+<button
+    type="button"
+    class="btn secondary"
+    id="refreshDevicesBtn"
+    onclick="refreshDevicesFromBackend()"
+>
+    ↻ Refresh
+</button>
+
+    <!-- ADD DEVICE -->
+    <button
+        type="button"
+        class="btn primary"
+        id="addDeviceBtn"
+    >
+        ＋ Add Device
+    </button>
+
+</div>
+        </div>
+
+        <!-- LIVE AUTO-PING STATUS BANNER -->
+        <div class="auto-ping-banner" id="devicesAutoPingBanner">
+          <div class="auto-ping-info">
+            <span class="auto-ping-dot pulse-dot" id="devicesPulseDot"></span>
+            <span class="auto-ping-title">Device Auto-Ping Active</span>
+            <span class="auto-ping-chip" id="devicesIntervalBadge">Interval: <b>10s</b></span>
+            <span class="auto-ping-badge" id="devicesCountdownBadge">Next ping in <b id="devicesCountdownText">10s</b></span>
+            <span class="auto-ping-sync-time" id="devicesLastSyncText">Ready</span>
+          </div>
+          <div class="auto-ping-actions">
+            <button type="button" class="auto-ping-btn" id="triggerDevicesPingBtn" onclick="triggerAutoPingAllDevices(true)">
+              ⚡ Ping All Devices Now
+            </button>
+            <button type="button" class="auto-ping-btn" style="background:#ef4444;border-color:#ef4444;color:#fff;" onclick="simulateQuickAlert('Device')" title="Simulate Status Change on a Device">
+              ⚡ Simulate Device Alert
+            </button>
+          </div>
+        </div>
+
+        <div class="toolbar"><input id="deviceSearch" placeholder="&#128269;  Search device, IP or location..." oninput="filterDevices()"><select id="deviceTypeFilter" onchange="filterDevices()"><option value="All Types">All Types</option><option value="Switch">Switch</option><option value="Router">Router</option><option value="Access Point">Access Point</option><option value="Firewall">Firewall</option></select><select id="deviceStatusFilter" onchange="filterDevices()"><option value="All Status">All Status</option><option value="Online">Online</option><option value="Offline">Offline</option></select></div>
+  <div class="card table-wrap">
+
+    <table>
+
+        <thead>
+
+            <tr>
+
+                <th>DEVICE</th>
+                <th>TYPE</th>
+                <th>IP ADDRESS</th>
+                <th>LOCATION</th>
+                <th>STATUS</th>
+                <th>LATENCY</th>
+                <th>UPTIME</th>
+                <th>LAST CHECK</th>
+
+            </tr>
+
+        </thead>
+
+
+        <tbody id="deviceRows"></tbody>
+
+    </table>
+
+</div>
+
+        <!-- ADD DEVICE MODAL -->
+        <div id="deviceModal" class="nms-modal" aria-hidden="true">
+          <div class="nms-modal-box" role="dialog" aria-modal="true" aria-labelledby="deviceModalTitle">
+            <div class="nms-modal-header">
+              <div><h3 id="deviceModalTitle">Add New Device</h3><p>Register a network device in the inventory.</p></div>
+              <button type="button" class="nms-close-btn" id="closeDeviceModal" aria-label="Close">×</button>
+            </div>
+            <form id="deviceForm" onsubmit="submitNewDevice(event)">
+              <div class="nms-form-grid">
+                <div class="nms-form-group"><label for="newDeviceId">Device ID *</label><input id="newDeviceId" type="text" placeholder="SW-10" required></div>
+                <div class="nms-form-group"><label for="newDeviceName">Device Name *</label><input id="newDeviceName" type="text" placeholder="Office Switch" required></div>
+                <div class="nms-form-group"><label for="newDeviceType">Device Type *</label><select id="newDeviceType" required><option value="Switch">Switch</option><option value="Router">Router</option><option value="Access Point">Access Point</option><option value="Firewall">Firewall</option><option value="Other">Other</option></select></div>
+                <div class="nms-form-group"><label for="newDeviceIp">IP Address *</label><input id="newDeviceIp" type="text" placeholder="10.10.10.10" required></div>
+                <div class="nms-form-group"><label for="newDeviceLocation">Location *</label><input id="newDeviceLocation" type="text" placeholder="Admin Block" required></div>
+                <div class="nms-form-group"><label for="newDeviceStatus">Status</label><select id="newDeviceStatus"><option value="Online">Online</option><option value="Offline">Offline</option></select></div>
+                <div class="nms-form-group"><label for="newDeviceUptime">Uptime</label><input id="newDeviceUptime" type="text" value="100%" placeholder="99.99%"></div>
+              </div>
+              <div class="nms-modal-actions">
+                <button type="button" class="btn secondary" id="cancelDeviceBtn">Cancel</button>
+                <button type="submit" class="btn primary">Save Device</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </section>
+
+      <!-- CAMERAS -->
+      <section class="page" id="cameras">
+        <div class="page-top">
+          <div><span class="crumb">SECURITY</span><h2>CCTV Camera Wall</h2><p>Authorized camera monitoring interface.</p></div>
+      <div class="nms-page-actions">
+
+    <!-- CCTV IP SEARCH -->
+    <div class="cctv-ip-search">
+        <span>⌕</span>
+
+        <input
+            type="text"
+            id="cameraIpSearch"
+            placeholder="Search camera by IP..."
+            autocomplete="off"
+        >
+
+        <button
+            type="button"
+            id="clearCameraSearch"
+            title="Clear search"
+        >
+            ×
+        </button>
+    </div>
+
+    <!-- REAL CCTV PAGE REFRESH -->
+    <button
+        type="button"
+        class="btn secondary"
+        id="refreshCamerasBtn"
+    >
+        ↻ Refresh
+    </button>
+
+    <button
+        type="button"
+        class="btn primary"
+        id="addCameraBtn"
+    >
+        ＋ Add CCTV
+    </button>
+
+</div>
+        </div>
+     
+        <!-- CCTV LIVE AUTO-PING STATUS BANNER -->
+        <div class="auto-ping-banner" id="camerasAutoPingBanner">
+          <div class="auto-ping-info">
+            <span class="auto-ping-dot pulse-dot" id="camerasPulseDot"></span>
+            <span class="auto-ping-title">CCTV Auto-Ping Active</span>
+            <span class="auto-ping-chip" id="camerasIntervalBadge">Interval: <b>15s</b></span>
+            <span class="auto-ping-badge" id="camerasCountdownBadge">Next ping in <b id="camerasCountdownText">15s</b></span>
+            <span class="auto-ping-sync-time" id="camerasLastSyncText">Ready</span>
+          </div>
+          <div class="auto-ping-actions">
+            <button type="button" class="auto-ping-btn" id="triggerCamerasPingBtn" onclick="triggerAutoPingAllCameras(true)">
+              ⚡ Ping All CCTV Now
+            </button>
+            <button type="button" class="auto-ping-btn" style="background:#ef4444;border-color:#ef4444;color:#fff;" onclick="simulateQuickAlert('Camera')" title="Simulate Status Change on a Camera">
+              ⚡ Simulate CCTV Alert
+            </button>
+          </div>
+        </div>
+
+        <!-- CCTV LIVE SUMMARY -->
+<div class="cctv-summary-grid">
+
+    <div class="cctv-stat-card total">
+        <span>Total Cameras</span>
+        <strong id="cctvTotalCount">0</strong>
+        <small>Registered cameras</small>
+    </div>
+
+    <div class="cctv-stat-card online">
+        <span>Online</span>
+        <strong id="cctvOnlineCount">0</strong>
+        <small>Currently online</small>
+    </div>
+
+    <div class="cctv-stat-card offline">
+        <span>Offline</span>
+        <strong id="cctvOfflineCount">0</strong>
+        <small>Not responding</small>
+    </div>
+
+    <div class="cctv-stat-card issues">
+        <span>Issues</span>
+        <strong id="cctvIssueCount">0</strong>
+        <small>Requires attention</small>
+    </div>
+
+</div>
+
+<!-- CCTV AVAILABILITY -->
+<div class="cctv-health-panel">
+
+    <div class="cctv-health-header">
+        <div>
+            <h3>Camera Infrastructure Health</h3>
+            <p>Real-time CCTV monitoring status</p>
+        </div>
+
+        <strong id="cctvAvailability">0%</strong>
+    </div>
+
+    <div class="cctv-health-bar">
+        <i id="cctvAvailabilityBar" style="width:0%"></i>
+    </div>
+
+    <div class="cctv-health-details">
+        <span>
+            <i class="cctv-dot online"></i>
+            Online
+        </span>
+
+        <span>
+            <i class="cctv-dot offline"></i>
+            Offline
+        </span>
+
+        <span>
+            <i class="cctv-dot unknown"></i>
+            Unknown
+        </span>
+    </div>
+
+</div>  
+
+
+        <div class="camera-grid" id="cameraGrid"></div>
+
+        <!-- ADD CCTV MODAL -->
+        <div id="cameraModal" class="nms-modal" aria-hidden="true">
+          <div class="nms-modal-box" role="dialog" aria-modal="true" aria-labelledby="cameraModalTitle">
+            <div class="nms-modal-header">
+              <div><h3 id="cameraModalTitle">Add New CCTV Camera</h3><p>Register a new camera in the CCTV wall.</p></div>
+              <button type="button" class="nms-close-btn" id="closeCameraModal" aria-label="Close">×</button>
+            </div>
+            <form id="cameraForm">
+              <div class="nms-form-grid">
+                <div class="nms-form-group"><label for="newCameraId">Camera ID *</label><input id="newCameraId" type="text" placeholder="CAM-17" required></div>
+                <div class="nms-form-group"><label for="newCameraName">Camera Name *</label><input id="newCameraName" type="text" placeholder="Main Gate" required></div>
+                <div class="nms-form-group"><label for="newCameraIp">IP Address *</label><input id="newCameraIp" type="text" placeholder="192.168.1.117" required></div>
+                <div class="nms-form-group"><label for="newCameraLocation">Location *</label><input id="newCameraLocation" type="text" placeholder="Main Gate" required></div>
+                <div class="nms-form-group"><label for="newCameraStatus">Status</label><select id="newCameraStatus"><option value="LIVE">LIVE</option><option value="OFFLINE">OFFLINE</option></select></div>
+              </div>
+              <div class="nms-modal-actions">
+                <button type="button" class="btn secondary" id="cancelCameraBtn">Cancel</button>
+                <button type="submit" class="btn primary">Save CCTV</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </section>
+
+      <!-- DESKTOP MANAGEMENT -->
+      <section class="page" id="desktops">
+        <div class="desktop-page-actions">
+    
+<!-- =========================================
+     ADD DESKTOP MODAL
+========================================= -->
+
+<div id="desktopModal" class="desktop-modal">
+
+    <div class="desktop-modal-box">
+
+        <div class="desktop-modal-header">
+
+            <div>
+                <h2>Add New Desktop</h2>
+                <p>Register a new company desktop</p>
+            </div>
+
+            <button
+                type="button"
+                class="desktop-close-btn"
+                id="closeDesktopModal">
+                ×
+            </button>
+    
+        </div>
+
+
+        <form id="desktopForm">
+
+            <div class="desktop-form-grid">
+
+                <div class="desktop-form-group">
+
+                    <label>Desktop ID</label>
+
+                    <input
+                        type="text"
+                        id="desktopId"
+                        placeholder="NM-DESK-004"
+                        required>
+
+                </div>
+
+
+                <div class="desktop-form-group">
+
+                    <label>Department</label>
+
+                    <input
+                        type="text"
+                        id="desktopDepartment"
+                        placeholder="IT Department"
+                        required>
+
+                </div>
+
+                <div class="desktop-form-group">
+
+    <label>Location</label>
+
+    <input
+        type="text"
+        id="desktopLocation"
+        placeholder="GATE / ADMIN / PLANT-1"
+        required>
+
+</div>
+
+                <div class="desktop-form-group">
+
+                    <label>IP Address</label>
+
+                    <input
+                        type="text"
+                        id="desktopIP"
+                        placeholder="192.168.1.24"
+                        required>
+
+                </div>
+
+
+                <div class="desktop-form-group">
+
+                    <label>Operating System</label>
+
+                    <select id="desktopOS">
+
+                        <option value="Windows 11">
+                            Windows 11
+                        </option>
+
+                        <option value="Windows 10">
+                            Windows 10
+                        </option>
+
+                        <option value="Linux">
+                            Linux
+                        </option>
+
+                    </select>
+
+                </div>
+
+
+                <div class="desktop-form-group">
+
+                    <label>CPU Usage (%)</label>
+
+                    <input
+                        type="number"
+                        id="desktopCPU"
+                        min="0"
+                        max="100"
+                        value="0">
+
+                </div>
+
+
+                <div class="desktop-form-group">
+
+                    <label>RAM Usage (%)</label>
+
+                    <input
+                        type="number"
+                        id="desktopRAM"
+                        min="0"
+                        max="100"
+                        value="0">
+
+                </div>
+
+
+                <div class="desktop-form-group">
+
+                    <label>Status</label>
+
+                    <select id="desktopStatus">
+
+                        <option value="Online">
+                            Online
+                        </option>
+
+                        <option value="Offline">
+                            Offline
+                        </option>
+
+                    </select>
+
+                </div>
+
+            </div>
+
+
+            <div class="desktop-form-actions">
+
+                <button
+                    type="button"
+                    class="desktop-cancel-btn"
+                    id="cancelDesktopBtn">
+                    Cancel
+                </button>
+
+                <button
+                    type="submit"
+                    class="desktop-save-btn">
+                    Save Desktop
+                </button>
+
+            </div>
+
+        </form>
+
+    </div>
+
+</div>
+
+<!-- =========================================
+     DESKTOP LOCATION MONITOR MODAL
+========================================= -->
+
+<div id="desktopLocationModal" class="desktop-modal">
+
+    <div class="desktop-modal-box">
+
+        <div class="desktop-modal-header">
+
+            <div>
+                <h2>Monitor Desktop Location</h2>
+                <p>Select a location for live desktop monitoring</p>
+            </div>
+
+            <button
+                type="button"
+                class="desktop-close-btn"
+                id="closeDesktopLocationModal">
+                ×
+            </button>
+
+        </div>
+
+        <div class="desktop-form-group">
+
+            <label>Search / Select Location</label>
+
+            <input
+                type="text"
+                id="desktopLocationSearch"
+                placeholder="Type location..."
+                autocomplete="off">
+
+        </div>
+
+        <div
+            id="desktopLocationList"
+            style="
+                margin-top:15px;
+                max-height:220px;
+                overflow-y:auto;
+            ">
+        </div>
+
+
+<!-- DESKTOP MONITORING CONTROL -->
+<div style="
+    margin-top:18px;
+    padding:15px;
+    border:1px solid #23384d;
+    border-radius:10px;
+    background:#101f2e;
+">
+
+    <div style="
+        display:flex;
+        justify-content:space-between;
+        align-items:center;
+        gap:15px;
+    ">
+
+        <div>
+            <strong style="color:#eaf4ff;">
+                Desktop Monitoring
+            </strong>
+
+            <div style="
+                margin-top:5px;
+                font-size:13px;
+                color:#71859a;
+            ">
+                Turn OFF to stop all desktop monitoring and ping.
+            </div>
+        </div>
+
+        <label style="
+            position:relative;
+            width:52px;
+            height:28px;
+            display:inline-block;
+        ">
+
+            <input
+                type="checkbox"
+                id="desktopMonitoringToggle"
+                checked
+                style="
+                    opacity:0;
+                    width:0;
+                    height:0;
+                "
+            >
+
+            <span id="desktopMonitoringSwitch" style="
+                position:absolute;
+                cursor:pointer;
+                inset:0;
+                background:#2588d8;
+                border-radius:30px;
+                transition:.25s;
+            "></span>
+
+        </label>
+
+    </div>
+
+    <div id="desktopMonitoringStatus" style="
+        margin-top:10px;
+        font-size:13px;
+        font-weight:600;
+        color:#39d98a;
+    ">
+        ● Monitoring ON
+    </div>
+
+</div>
+
+
+        <div class="desktop-form-actions">
+
+            <button
+                type="button"
+                class="desktop-cancel-btn"
+                id="cancelDesktopLocationBtn">
+                Cancel
+            </button>
+
+            <button
+                type="button"
+                class="desktop-save-btn"
+                id="applyDesktopLocationBtn">
+                Apply Location
+            </button>
+
+        </div>
+
+    </div>
+
+</div>
+
+<!-- =========================================
+     VIEW DESKTOP MODAL
+========================================= -->
+
+<div id="desktopViewModal" class="desktop-modal">
+
+    <div class="desktop-modal-box view-box">
+
+        <div class="desktop-modal-header">
+
+            <div>
+                <h2>Desktop Details</h2>
+                <p>System information</p>
+            </div>
+
+            <button
+                type="button"
+                class="desktop-close-btn"
+                onclick="closeDesktopView()">
+                ×
+            </button>
+
+        </div>
+
+
+        <div id="desktopDetails"></div>
+
+    </div>
+
+</div>
+    <div class="page-header">
+        <div>
+            <h1>Desktop Management</h1>
+            <p>Monitor and manage company desktop systems</p>
+        </div>
+<div style="display:flex; gap:10px; align-items:center;"></div>
+
+<button
+    type="button"
+    class="primary-btn desktop-location-btn"
+    id="desktopLocationBtn"
+    onclick="
+        const modal = document.getElementById('desktopLocationModal');
+        if (modal) {
+            modal.classList.add('show');
+        }
+        if (typeof renderDesktopLocationOptions === 'function') {
+            renderDesktopLocationOptions();
+        }
+    ">
+    📍 Monitor Location
+</button>
+
+    <button type="button" class="desktop-refresh-btn" id="desktopRefreshBtn">
+        🔄 Refresh
+    </button>
+</div>
+
+        <button class="primary-btn" id="addDesktopBtn">
+            + Add Desktop
+</button>
+    </div>
+
+
+    <!-- Desktop Summary -->
+
+    <div class="stats-grid">
+
+        <div class="stat-card">
+            <span>Total Desktops</span>
+            <strong>32</strong>
+            <small>Registered systems</small>
+        </div>
+
+        <div class="stat-card">
+            <span>Online</span>
+            <strong class="text-green">28</strong>
+            <small>Currently online</small>
+        </div>
+
+        <div class="stat-card">
+            <span>Offline</span>
+            <strong class="text-red">4</strong>
+            <small>Not responding</small>
+        </div>
+
+        <div class="stat-card">
+            <span>Issues</span>
+            <strong class="text-amber">3</strong>
+            <small>Requires attention</small>
+        </div>
+
+    </div>
+
+
+    <!-- Desktop List -->
+
+    <div class="panel">
+
+        <div class="panel-header">
+
+            <div>
+                <h3>Desktop Inventory</h3>
+                <p>All registered desktop systems</p>
+            </div>
+
+            <input
+                type="search"
+                class="table-search"
+                placeholder="Search desktop..."
+            >
+
+        </div>
+
+
+        <div class="table-wrapper">
+
+            <table>
+
+                <thead>
+                    <tr>
+                        <th>Desktop ID</th>
+                        <th>Department</th>
+                        <th>IP Address</th>
+                        <th>Operating System</th>
+                        <th>CPU</th>
+                        <th>RAM</th>
+                        <th>Status</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+
+                <tbody>
+
+                    <tr>
+                        <td><strong>NM-DESK-001</strong></td>
+                        <td>Admin</td>
+                        <td>192.168.1.21</td>
+                        <td>Windows 11</td>
+                        <td>18%</td>
+                        <td>54%</td>
+                        <td>
+                            <span class="status-badge online">
+                                ● Online
+                            </span>
+                        </td>
+                        <td>
+                            <button type="button" class="table-action" onclick="viewDesktop('NM-DESK-001')">
+                                View
+                            </button>
+                        </td>
+                    </tr>
+
+
+                    <tr>
+                        <td><strong>NM-DESK-002</strong></td>
+                        <td>Accounts</td>
+                        <td>192.168.1.22</td>
+                        <td>Windows 11</td>
+                        <td>42%</td>
+                        <td>71%</td>
+                        <td>
+                            <span class="status-badge online">
+                                ● Online
+                            </span>
+                        </td>
+                        <td>
+                            <button type="button" class="table-action" onclick="viewDesktop('NM-DESK-002')">
+                                View
+                            </button>
+                        </td>
+                    </tr>
+
+
+                    <tr>
+                        <td><strong>NM-DESK-003</strong></td>
+                        <td>HR</td>
+                        <td>192.168.1.23</td>
+                        <td>Windows 10</td>
+                        <td>—</td>
+                        <td>—</td>
+                        <td>
+                            <span class="status-badge offline">
+                                ● Offline
+                            </span>
+                        </td>
+                        <td>
+                            <button type="button" class="table-action" onclick="viewDesktop('NM-DESK-003')">
+                                View
+                            </button>
+                        </td>
+                    </tr>
+</tbody>
+
+            </table>
+
+        </div>
+
+    </div>
+
+</section>
+
+      <!-- NETWORK -->
+      <section class="page" id="network">
+        <div class="page-top"><div><span class="crumb">NETWORK</span><h2>Live Network Map</h2><p>Logical topology and reachability overview.</p></div><button class="btn primary" onclick="pingTest()">⌁ Run Ping Test</button></div>
+        <div class="card topology">
+          <div class="topo-node core"><b>CORE-RTR-01</b><small>10.10.0.1</small><span class="status online">● ONLINE · 1ms</span></div>
+          <div class="line l1"></div><div class="line l2"></div><div class="line l3"></div>
+          <div class="topo-node n1"><b>SW-01</b><small>Data Center</small><span class="status online">● ONLINE</span></div>
+          <div class="topo-node n2"><b>SW-04</b><small>Admin Block</small><span class="status online">● ONLINE</span></div>
+          <div class="topo-node n3"><b>SW-07</b><small>Production Block</small><span class="status offline">● OFFLINE</span></div>
+          <div class="map-legend"><span><i class="dot green"></i>Online</span><span><i class="dot red"></i>Offline</span><span><i class="dot blue"></i>Core</span></div>
+        </div>
+      </section>
+
+      <!-- SERVERS -->
+
+
+      <!-- ALERTS -->
+      <section class="page" id="alerts">
+        <div class="page-top">
+          <div><span class="crumb">OPERATIONS</span><h2>Alerts & Incidents</h2><p>Monitor, acknowledge, and clear infrastructure events.</p></div>
+          <div style="display:flex;gap:10px;align-items:center;">
+            <button class="btn primary" style="background:#ef4444;border-color:#ef4444;font-weight:600;" onclick="simulateQuickAlert()" title="Trigger Real-time Alert Test">⚡ Simulate Status Alert</button>
+            <button class="btn secondary" onclick="ackAlerts()" id="btnAckAlerts" title="Acknowledge and clear all active alerts">✓ Acknowledge All</button>
+            <button class="btn secondary" style="background:#1b2a3a;border-color:#2b425b;color:#cbd5e1;" onclick="clearAllAlerts()" id="btnClearAlerts" title="Clear all alerts from database">🗑 Clear All</button>
+          </div>
+        </div>
+        <div style="display:flex;gap:10px;margin-bottom:12px;border-bottom:1px solid #1a2b3b;padding-bottom:8px;">
+          <button id="alertTabActive" onclick="setAlertView('active')" style="background:none;border:none;border-bottom:2px solid #51b7f7;color:#51b7f7;font-weight:700;font-size:12px;cursor:pointer;padding:6px 14px;">Active Alerts (<span id="alertActiveBadge">0</span>)</button>
+          <button id="alertTabAll" onclick="setAlertView('all')" style="background:none;border:none;border-bottom:2px solid transparent;color:#64798e;font-weight:600;font-size:12px;cursor:pointer;padding:6px 14px;">Alert History (<span id="alertAllBadge">0</span>)</button>
+        </div>
+        <div class="card incident-list">
+          <div style="padding:40px;text-align:center;color:#688097;"><small>Loading alerts...</small></div>
+        </div>
+      </section>
+
+      <!-- LOGS REMOVED -->
+
+      <!-- REPORTS -->
+      <section class="page" id="reports">
+
+    <div class="reports-page">
+
+        <!-- HEADER -->
+
+        <div class="reports-header">
+
+            <div>
+                <h1>Reports & Analytics</h1>
+
+                <p>
+                    Generate and download network monitoring reports
+                </p>
+            </div>
+
+            <button type="button"
+                class="reports-generate-btn"
+                id="generateReportBtn">
+
+                ↻ Generate Report
+
+            </button>
+<button type="button"
+        class="clear-report-btn"
+        id="clearReportHistory">
+    🗑️ Clear Reports History
+</button>
+
+        </div>
+
+
+        <!-- FILTER -->
+
+        <div class="reports-filter">
+
+            <div class="report-date-group">
+
+                <label>From Date</label>
+
+                <input
+                    type="date"
+                    id="reportFromDate">
+
+            </div>
+
+
+            <div class="report-date-group">
+
+                <label>To Date</label>
+
+                <input
+                    type="date"
+                    id="reportToDate">
+
+            </div>
+
+
+            <div class="report-filter-status" id="reportStatus">
+
+                <span id="reportStatusText">Ready to generate report</span>
+
+            </div>
+
+        </div>
+
+
+        <!-- SUMMARY -->
+
+        <div class="report-summary-grid">
+
+            <div class="report-card">
+
+                <div class="report-card-icon blue">
+                    🖥
+                </div>
+
+                <div>
+                    <span>Total Devices</span>
+                    <strong id="reportTotalDevices">48</strong>
+                    <small>Monitored devices</small>
+                </div>
+
+            </div>
+
+
+            <div class="report-card">
+
+                <div class="report-card-icon green">
+                    ✓
+                </div>
+
+                <div>
+                    <span>Online Devices</span>
+                    <strong id="reportOnlineDevices">44</strong>
+                    <small>Currently online</small>
+                </div>
+
+            </div>
+
+
+            <div class="report-card">
+
+                <div class="report-card-icon red">
+                    !
+                </div>
+
+                <div>
+                    <span>Active Alerts</span>
+                    <strong id="reportActiveAlerts">3</strong>
+                    <small>Requires attention</small>
+                </div>
+
+            </div>
+
+
+            <div class="report-card">
+
+                <div class="report-card-icon purple">
+                    %
+                </div>
+
+                <div>
+                    <span>Network Uptime</span>
+                    <strong id="reportUptime">99.7%</strong>
+                    <small>Selected period</small>
+                </div>
+
+            </div>
+
+        </div>
+
+
+        <!-- DOWNLOAD AREA -->
+
+        <div class="reports-download-panel">
+
+            <div>
+
+                <h3>Download Report</h3>
+
+                <p>
+                    Export the selected monitoring data
+                    for further analysis.
+                </p>
+
+            </div>
+
+
+            <div class="report-download-buttons">
+
+                <button
+                    type="button"
+                    class="report-csv-btn"
+                    id="downloadCSV"
+                    onclick="downloadCSVReport()">
+
+                    ↓ CSV
+
+                </button>
+
+
+                <button
+                    type="button"
+                    class="report-excel-btn"
+                    id="downloadExcel"
+                    onclick="downloadExcelReport()">
+
+                    ↓ Excel
+
+                </button>
+
+
+                <button
+                    type="button"
+                    class="report-zip-btn"
+                    id="downloadZIP"
+                    title="Download all sections as separate CSV files in a ZIP archive"
+                    onclick="downloadZipReport()">
+
+                    ↓ ZIP (CSVs)
+
+                </button>
+
+            </div>
+
+        </div>
+
+
+        <!-- NETWORK REPORT TABLE -->
+
+        <div class="reports-table-panel">
+
+            <div class="reports-table-header">
+
+                <div>
+
+                    <h3>Network Monitoring Report</h3>
+
+                    <p>
+                        Device availability and network status
+                    </p>
+
+                </div>
+
+                <span id="reportRecordCount">
+                    0 Records
+                </span>
+
+            </div>
+
+
+            <div class="reports-table-wrapper">
+
+                <table
+                    class="reports-table"
+                    id="networkReportTable">
+
+                    <thead>
+
+                        <tr>
+
+                            <th>Device ID</th>
+                            <th>Device Name</th>
+                            <th>Type</th>
+                            <th>IP Address</th>
+                            <th>Status</th>
+                            <th>Uptime</th>
+                            <th>Last Check</th>
+
+                        </tr>
+
+                    </thead>
+
+
+                    <tbody id="reportTableBody">
+
+                        <!-- JavaScript will load data -->
+
+                    </tbody>
+
+                </table>
+
+            </div>
+
+        </div>
+
+    </div>
+
+</section>
+
+      <!-- SETTINGS -->
+      <section class="page" id="settings">
+      <div class="settings-container">
+
+    <div class="settings-header">
+    
+        <div>
+            <h1>⚙ Settings</h1>
+            <p>Configure your Network Monitoring System</p>
+        </div>
+
+        <button class="back-btn" onclick="goDashboard()">
+            ← Dashboard
+        </button>
+    </div>
+
+
+    <!-- GENERAL SETTINGS -->
+    <div class="settings-card">
+
+        <h2>🌐 General Settings</h2>
+
+        <div class="settings-grid">
+
+            <div class="setting-item">
+                <label>Theme</label>
+                <select id="theme">
+                    <option value="dark">Dark</option>
+                    <option value="light">Light</option>
+                </select>
+            </div>
+
+
+                          <div class="setting-item">
+                <label>Language</label>
+                <select id="language">
+                    <option value="en">English (System)</option>
+                    <option value="bn">Bengali (?????)</option>
+                    <option value="hi">Hindi (??????)</option>
+                </select>
+              </div>
+
+
+                          <div class="setting-item">
+                <label>Time Format</label>
+                <select id="timeFormat">
+                    <option value="24">Train Time (24-hour)</option>
+                    <option value="12">System Time (12-hour)</option>
+                </select>
+              </div>
+
+
+            
+
+        </div>
+
+    </div>
+
+
+
+    <!-- NETWORK MONITORING -->
+    <div class="settings-card">
+
+        <h2>🌐 Network Monitoring</h2>
+
+        <div class="setting-row">
+
+            <div>
+                <strong>Network Monitoring</strong>
+                <p>Enable or disable network monitoring</p>
+            </div>
+
+            <label class="switch">
+                <input type="checkbox" id="networkMonitoring">
+                <span class="slider"></span>
+            </label>
+
+        </div>
+
+
+        <div class="setting-item">
+
+            <label>Network Check Interval</label>
+
+            <select id="networkInterval">
+                <option value="5">5 Seconds</option>
+                <option value="10">10 Seconds</option>
+                <option value="30">30 Seconds</option>
+                <option value="60">1 Minute</option>
+                <option value="120">2 Minutes</option>
+                <option value="300">5 Minutes</option>
+                <option value="600">10 Minutes</option>
+                <option value="900">15 Minutes</option>
+                <option value="1800">30 Minutes</option>
+                <option value="3600">1 Hour</option>
+            </select>
+
+        </div>
+
+    </div>
+
+
+
+    <!-- CAMERA MONITORING -->
+    <div class="settings-card">
+
+        <h2>📷 Camera Monitoring</h2>
+
+        <div class="setting-row">
+
+            <div>
+                <strong>Camera Monitoring</strong>
+                <p>Enable or disable camera monitoring</p>
+            </div>
+
+            <label class="switch">
+
+                <input type="checkbox" id="cameraMonitoring">
+
+                <span class="slider"></span>
+
+            </label>
+
+        </div>
+
+
+        <div class="setting-item">
+
+            <label>Camera Check Interval</label>
+
+            <select id="cameraInterval">
+                <option value="5">5 Seconds</option>
+                <option value="10">10 Seconds</option>
+                <option value="30">30 Seconds</option>
+                <option value="60">1 Minute</option>
+                <option value="120">2 Minutes</option>
+                <option value="300">5 Minutes</option>
+                <option value="600">10 Minutes</option>
+                <option value="900">15 Minutes</option>
+                <option value="1800">30 Minutes</option>
+                <option value="3600">1 Hour</option>
+            </select>
+
+        </div>
+
+        <div class="setting-item" style="margin-top:15px;">
+
+            <label>Offline Camera Retry Interval</label>
+
+            <select id="cameraRetryInterval">
+                <option value="10">10 Seconds</option>
+                <option value="30">30 Seconds</option>
+                <option value="60">1 Minute</option>
+                <option value="120">2 Minutes</option>
+                <option value="300">5 Minutes</option>
+                <option value="600">10 Minutes</option>
+                <option value="900">15 Minutes</option>
+                <option value="1800">30 Minutes</option>
+                <option value="3600">1 Hour</option>
+            </select>
+
+        </div>
+
+    </div>
+
+
+    <!-- ALERT SETTINGS -->
+    <div class="settings-card">
+
+        <h2>🚨 Alert & Recovery</h2>
+
+        <div class="setting-row">
+
+            <div>
+                <strong>Alert System</strong>
+                <p>Enable system alerts and notifications</p>
+            </div>
+
+            <label class="switch">
+
+                <input type="checkbox" id="alert" checked>
+
+                <span class="slider"></span>
+
+            </label>
+
+        </div>
+
+    </div>
+
+
+
+    <!-- NOTIFICATION -->
+    <div class="settings-card">
+
+        <h2>📧 Notification Settings</h2>
+
+        <div class="setting-row">
+
+            <div>
+                <strong>🔊 Sound Notification</strong>
+                <p>Play audio chime when an alert occurs</p>
+            </div>
+
+            <div style="display:flex; align-items:center; gap:12px;">
+                <button type="button" class="btn secondary" style="padding:5px 12px; font-size:12px; border-radius:6px; cursor:pointer;" onclick="testSound()">▶ Test Sound</button>
+                <label class="switch">
+                    <input type="checkbox" id="soundNotification" checked>
+                    <span class="slider"></span>
+                </label>
+            </div>
+
+        </div>
+
+    </div>
+      <div class="settings-footer" style="display:flex; justify-content:flex-end; gap:15px; margin-top:20px; padding-top:20px; border-top:1px solid #1e293b;">
+          <button class="btn secondary" onclick="resetSettings()">Reset to Defaults</button>
+          <button class="btn primary" onclick="saveSettings()">Save Changes</button>
+      </div>
+    </section>
+
+      <!-- ADMIN PANEL -->
+      <section class="page" id="admin-panel">
+        <div class="page-top">
+          <div>
+            <span class="crumb">ADMINISTRATION & SECURITY</span>
+            <h2>Admin Management & System Health</h2>
+            <p>Manage system administrators, verify access credentials, and monitor core infrastructure telemetry.</p>
+          </div>
+          <div class="nms-page-actions">
+            <button type="button" class="btn secondary" id="adminRefreshTelemetryBtn" onclick="loadAdminPanelData()">
+              ↻ Refresh Telemetry
+            </button>
+            <button type="button" class="btn primary" id="openAddAdminBtn" onclick="openAddAdminModal()">
+              ＋ Add Administrator
+            </button>
+          </div>
+        </div>
+
+        <!-- 4 KPI CARDS -->
+        <div class="stats admin-kpi-grid">
+          <div class="stat">
+            <div class="stat-icon blue">🛡️</div>
+            <div>
+              <small>Total Administrators</small>
+              <strong id="adminPanelTotalCount">--</strong>
+              <span class="positive">Configured in DB</span>
+            </div>
+          </div>
+          <div class="stat">
+            <div class="stat-icon green">🟢</div>
+            <div>
+              <small>Active Accounts</small>
+              <strong id="adminPanelActiveCount">--</strong>
+              <span class="positive" id="adminPanelActivePercent">100% Operational</span>
+            </div>
+          </div>
+          <div class="stat">
+            <div class="stat-icon purple" style="background:rgba(168,85,247,0.15); color:#c084fc;">⚡</div>
+            <div>
+              <small>Backend Service</small>
+              <strong id="adminPanelBackendStatus" style="font-size:18px;">FastAPI Online</strong>
+              <span class="positive" id="adminPanelBackendSub">Port 8000 (Proxy 8081)</span>
+            </div>
+          </div>
+          <div class="stat">
+            <div class="stat-icon amber">🗄️</div>
+            <div>
+              <small>Database Connectivity</small>
+              <strong id="adminPanelDbStatus" style="font-size:18px;">Connected</strong>
+              <span class="positive" id="adminPanelDbSub">MySQL Pool Active</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- SYSTEM TELEMETRY STRIP -->
+        <div class="card admin-telemetry-panel" style="margin-bottom:20px; padding:16px 20px;">
+          <div style="display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:16px;">
+            <div style="display:flex; flex-wrap:wrap; align-items:center; gap:24px;">
+              <div class="telem-item">
+                <span style="font-size:11px; text-transform:uppercase; color:#64748b; letter-spacing:0.5px; display:block; margin-bottom:3px;">Ping Monitoring Engine</span>
+                <span id="telemPingStatus" style="font-size:13px; font-weight:600; color:#38bdf8; display:flex; align-items:center; gap:6px;">
+                  <span class="pulse-dot green"></span> Running (30s Cycle)
+                </span>
+              </div>
+              <div class="telem-item">
+                <span style="font-size:11px; text-transform:uppercase; color:#64748b; letter-spacing:0.5px; display:block; margin-bottom:3px;">CCTV Wall Engine</span>
+                <span id="telemCctvStatus" style="font-size:13px; font-weight:600; color:#34d399; display:flex; align-items:center; gap:6px;">
+                  <span class="pulse-dot green"></span> Running (60s Cycle)
+                </span>
+              </div>
+              <div class="telem-item">
+                <span style="font-size:11px; text-transform:uppercase; color:#64748b; letter-spacing:0.5px; display:block; margin-bottom:3px;">Desktop Agent Engine</span>
+                <span id="telemDesktopStatus" style="font-size:13px; font-weight:600; color:#a78bfa; display:flex; align-items:center; gap:6px;">
+                  <span class="pulse-dot green"></span> Running (45s Cycle)
+                </span>
+              </div>
+            </div>
+            <div style="display:flex; align-items:center; gap:12px;">
+              <span style="font-size:12px; color:#94a3b8;">Current Session:</span>
+              <span id="adminPanelCurrentAdminBadge" style="background:#1e293b; color:#38bdf8; border:1px solid #334155; padding:5px 12px; border-radius:6px; font-size:12px; font-weight:600;">
+                admin@neometaliks.com
+              </span>
+              <button type="button" class="btn secondary" style="padding:5px 12px; font-size:12px;" onclick="openAdminProfile()">
+                Profile Settings
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- SEARCH & FILTER TOOLBAR -->
+        <div class="toolbar" style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:16px;">
+          <div style="display:flex; gap:12px; flex:1; min-width:280px;">
+            <input id="adminSearchInput" placeholder="🔍 Search admin name, email, department or location..." oninput="filterAdminsTable()" style="flex:1;">
+            <select id="adminStatusFilter" onchange="filterAdminsTable()" style="min-width:140px;">
+              <option value="all">All Status</option>
+              <option value="active">Active Only</option>
+              <option value="inactive">Inactive Only</option>
+            </select>
+          </div>
+          <div style="color:#64748b; font-size:13px;">
+            Showing <strong id="adminVisibleCount" style="color:#f8fafc;">0</strong> admins
+          </div>
+        </div>
+
+        <!-- ADMIN TABLE -->
+        <div class="card table-wrap" style="margin-bottom:24px;">
+          <table id="adminTable">
+            <thead>
+              <tr>
+                <th style="width:60px;">ID</th>
+                <th>Administrator</th>
+                <th>Email Address</th>
+                <th>Department</th>
+                <th>Location</th>
+                <th>Account Status</th>
+                <th>Created Date</th>
+                <th style="text-align:right;">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="adminTableBody">
+              <tr>
+                <td colspan="8" style="text-align:center; padding:30px; color:#94a3b8;">
+                  Loading administrator records...
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+    </div>
+
+    <!-- ADD ADMINISTRATOR MODAL -->
+    <div id="addAdminModal" class="admin-modal-overlay" style="display:none;">
+      <div class="admin-modal-dialog">
+        <div class="admin-modal-head">
+          <div style="display:flex; align-items:center; gap:10px;">
+            <span style="font-size:22px;">🛡️</span>
+            <h3 style="margin:0; font-size:17px; color:#f8fafc;">Add New Administrator</h3>
+          </div>
+          <button type="button" class="btn-close" onclick="closeAddAdminModal()">✕</button>
+        </div>
+        <form id="addAdminForm" onsubmit="submitCreateAdmin(event)" style="padding:22px;">
+          <div id="addAdminAlert" style="display:none; padding:10px 14px; border-radius:8px; font-size:13px; margin-bottom:16px;"></div>
+
+          <div class="form-group" style="margin-bottom:14px;">
+            <label style="display:block; font-size:12px; color:#94a3b8; margin-bottom:6px; font-weight:600;">Full Name <span style="color:#ef4444;">*</span></label>
+            <input type="text" id="newAdminName" placeholder="e.g. Subrata Mukherjee" required style="width:100%; box-sizing:border-box;">
+          </div>
+
+          <div class="form-group" style="margin-bottom:14px;">
+            <label style="display:block; font-size:12px; color:#94a3b8; margin-bottom:6px; font-weight:600;">Email Address <span style="color:#ef4444;">*</span></label>
+            <input type="email" id="newAdminEmail" placeholder="admin@neometaliks.com" required style="width:100%; box-sizing:border-box;">
+          </div>
+
+          <div class="form-group" style="margin-bottom:14px;">
+            <label style="display:block; font-size:12px; color:#94a3b8; margin-bottom:6px; font-weight:600;">Password <span style="color:#ef4444;">*</span> (min. 6 characters)</label>
+            <div style="position:relative;">
+              <input type="password" id="newAdminPassword" placeholder="••••••••" required minlength="6" style="width:100%; box-sizing:border-box; padding-right:42px;">
+              <button type="button" onclick="toggleNewAdminPasswordVisibility()" style="position:absolute; right:12px; top:50%; transform:translateY(-50%); background:none; border:none; cursor:pointer; color:#94a3b8; font-size:16px; padding:0;">👁</button>
+            </div>
+          </div>
+
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:14px;">
+            <div class="form-group">
+              <label style="display:block; font-size:12px; color:#94a3b8; margin-bottom:6px; font-weight:600;">Department</label>
+              <input type="text" id="newAdminDept" placeholder="IT & Network" value="IT & Network" style="width:100%; box-sizing:border-box;">
+            </div>
+            <div class="form-group">
+              <label style="display:block; font-size:12px; color:#94a3b8; margin-bottom:6px; font-weight:600;">Location</label>
+              <input type="text" id="newAdminLocation" placeholder="Neo Metaliks Plant" value="Neo Metaliks" style="width:100%; box-sizing:border-box;">
+            </div>
+          </div>
+
+          <div class="form-group" style="margin-bottom:20px;">
+            <label style="display:block; font-size:12px; color:#94a3b8; margin-bottom:6px; font-weight:600;">Phone Number</label>
+            <input type="tel" id="newAdminPhone" placeholder="+91 9876543210" style="width:100%; box-sizing:border-box;">
+          </div>
+
+          <div style="display:flex; justify-content:flex-end; gap:10px; padding-top:12px; border-top:1px solid #1e293b;">
+            <button type="button" class="btn secondary" onclick="closeAddAdminModal()">Cancel</button>
+            <button type="submit" class="btn primary" id="createAdminSubmitBtn">Create Administrator</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+<div id="toast"></div>
+
+<audio id="nmsChimePlayer" preload="auto" style="display:none;"></audio>
+
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="config.js"></script>
+<script src="script_v2.js?v=12"></script>
+
+<script type="text/javascript">
+function googleTranslateElementInit() {
+  new google.translate.TranslateElement({pageLanguage: 'en', includedLanguages: 'en,bn,hi', autoDisplay: false}, 'google_translate_element');
+}
+</script>
+<script type="text/javascript" src="https://translate.google.com/translate_a/element.js?cb=googleTranslateElementInit"></script>
 </body>
 </html>

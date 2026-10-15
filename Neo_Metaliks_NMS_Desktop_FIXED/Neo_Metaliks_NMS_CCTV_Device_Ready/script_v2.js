@@ -87,7 +87,10 @@ function openPage(pageName, updateHash = true) {
         if (typeof loadAdminProfileData === 'function') loadAdminProfileData();
     } else if (pageName === 'admin-panel') {
         if (typeof loadAdminPanelData === 'function') loadAdminPanelData();
+    } else if (pageName === 'settings') {
+        if (typeof loadSettings === 'function') loadSettings();
     }
+    if (typeof updateAutoPingBannerUI === 'function') updateAutoPingBannerUI();
     return true;
 }
 
@@ -616,6 +619,17 @@ function renderBackendDevices(
                                 onclick="pingDeviceFromFrontend(${device.id})">
 
                                 PING
+
+                            </button>
+
+                            <button
+                                type="button"
+                                class="table-action"
+                                style="background:#0284c7;color:#fff;font-weight:600;padding:4px 8px;border-radius:4px;"
+                                title="Toggle Online / Offline Status"
+                                onclick="toggleDeviceStatus(${device.id})">
+
+                                TOGGLE
 
                             </button>
 
@@ -1387,17 +1401,59 @@ const defaultSettings = {
     cameraMonitoring: true,
     cameraInterval: "30",
 
+    desktopMonitoring: true,
+    desktopInterval: "10",
+
     alert: true,
     soundNotification: true,
 };
 
 
 // ------------------------------------------
-// GET ELEMENT
+// GET ELEMENT & SELECT HELPER
 // ------------------------------------------
 
 function get(id) {
     return document.getElementById(id);
+}
+
+function setSelectValueSafely(selectEl, val) {
+    if (!selectEl || val === undefined || val === null) return;
+    const strVal = String(val).trim();
+    let found = false;
+    for (let i = 0; i < selectEl.options.length; i++) {
+        if (selectEl.options[i].value === strVal) {
+            selectEl.selectedIndex = i;
+            found = true;
+            break;
+        }
+    }
+    if (!found && strVal !== "") {
+        const num = parseInt(strVal, 10);
+        let label = strVal + " Seconds";
+        if (!isNaN(num)) {
+            if (num >= 3600 && num % 3600 === 0) label = (num / 3600) + (num === 3600 ? " Hour" : " Hours");
+            else if (num >= 60 && num % 60 === 0) label = (num / 60) + (num === 60 ? " Minute" : " Minutes");
+            else if (num >= 60) {
+                const mins = Math.floor(num / 60);
+                const secs = num % 60;
+                label = `${mins}m ${secs}s`;
+            }
+        }
+        const opt = document.createElement("option");
+        opt.value = strVal;
+        opt.textContent = label;
+        selectEl.appendChild(opt);
+        selectEl.value = strVal;
+    }
+}
+
+function formatIntervalDisplay(sec) {
+    const s = Number(sec);
+    if (isNaN(s)) return `${sec}`;
+    if (s >= 3600 && s % 3600 === 0) return `${s / 3600} Hour${s > 3600 ? 's' : ''}`;
+    if (s >= 60 && s % 60 === 0) return `${s / 60} Minute${s > 60 ? 's' : ''}`;
+    return `${s}s`;
 }
 
 
@@ -1406,9 +1462,7 @@ function get(id) {
 // ------------------------------------------
 
 async function loadSettings() {
-
     let saved = localStorage.getItem("nmsSettings");
-
     let settings;
 
     if (saved) {
@@ -1427,9 +1481,10 @@ async function loadSettings() {
         try {
             const apiBase = (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL !== undefined && window.APP_CONFIG.API_BASE_URL !== null)
                             ? window.APP_CONFIG.API_BASE_URL : (typeof NMS_API_BASE !== 'undefined' ? NMS_API_BASE : "");
-            const [netRes, camRes] = await Promise.allSettled([
+            const [netRes, camRes, deskRes] = await Promise.allSettled([
                 fetch(`${apiBase}/api/settings/network`, { headers: { "Authorization": `Bearer ${token}` } }).then(r => r.json()),
-                fetch(`${apiBase}/api/settings/camera`, { headers: { "Authorization": `Bearer ${token}` } }).then(r => r.json())
+                fetch(`${apiBase}/api/settings/camera`, { headers: { "Authorization": `Bearer ${token}` } }).then(r => r.json()),
+                fetch(`${apiBase}/api/desktops/monitoring`, { headers: { "Authorization": `Bearer ${token}` } }).then(r => r.json())
             ]);
             if (netRes.status === "fulfilled" && netRes.value && netRes.value.interval) {
                 settings.networkInterval = String(netRes.value.interval);
@@ -1437,64 +1492,56 @@ async function loadSettings() {
             }
             if (camRes.status === "fulfilled" && camRes.value && camRes.value.camera_interval) {
                 settings.cameraInterval = String(camRes.value.camera_interval);
-                if (camRes.value.camera_retry_interval) settings.cameraRetryInterval = camRes.value.camera_retry_interval;
+                if (camRes.value.camera_retry_interval) settings.cameraRetryInterval = String(camRes.value.camera_retry_interval);
                 if (camRes.value.camera_monitoring !== undefined) settings.cameraMonitoring = Boolean(camRes.value.camera_monitoring);
+            }
+            if (deskRes.status === "fulfilled" && deskRes.value) {
+                if (deskRes.value.interval) settings.desktopInterval = String(deskRes.value.interval);
+                if (deskRes.value.enabled !== undefined) settings.desktopMonitoring = Boolean(deskRes.value.enabled);
             }
             localStorage.setItem("nmsSettings", JSON.stringify(settings));
         } catch (_) {}
     }
 
-
     // GENERAL
-    if (!get("theme")) return;
-    get("theme").value = settings.theme || defaultSettings.theme;
-    get("language").value = settings.language || defaultSettings.language;
-    if(get("timeFormat")) get("timeFormat").value = settings.timeFormat || defaultSettings.timeFormat;
-    
-
+    if (get("theme")) get("theme").value = settings.theme || defaultSettings.theme;
+    if (get("language")) get("language").value = settings.language || defaultSettings.language;
+    if (get("timeFormat")) get("timeFormat").value = settings.timeFormat || defaultSettings.timeFormat;
 
     // NETWORK
-    get("networkMonitoring").checked =
-        settings.networkMonitoring ?? defaultSettings.networkMonitoring;
-
-    get("networkInterval").value =
-        settings.networkInterval || defaultSettings.networkInterval;
-
+    if (get("networkMonitoring")) {
+        get("networkMonitoring").checked = settings.networkMonitoring ?? defaultSettings.networkMonitoring;
+    }
+    setSelectValueSafely(get("networkInterval"), settings.networkInterval || defaultSettings.networkInterval);
 
     // CAMERA
-    get("cameraMonitoring").checked =
-        settings.cameraMonitoring ?? defaultSettings.cameraMonitoring;
+    if (get("cameraMonitoring")) {
+        get("cameraMonitoring").checked = settings.cameraMonitoring ?? defaultSettings.cameraMonitoring;
+    }
+    setSelectValueSafely(get("cameraInterval"), settings.cameraInterval || defaultSettings.cameraInterval);
+    setSelectValueSafely(get("cameraRetryInterval"), settings.cameraRetryInterval || 120);
 
-    get("cameraInterval").value =
-        settings.cameraInterval || defaultSettings.cameraInterval;
-
-    get("cameraRetryInterval").value =
-        settings.cameraRetryInterval || 120;
+    // DESKTOP
+    if (get("desktopMonitoringSetting")) {
+        get("desktopMonitoringSetting").checked = settings.desktopMonitoring ?? defaultSettings.desktopMonitoring;
+    }
+    setSelectValueSafely(get("desktopInterval"), settings.desktopInterval || settings.networkInterval || defaultSettings.desktopInterval);
 
     // ALERT
-    get("alert").checked =
-        settings.alert ?? defaultSettings.alert;
-
+    if (get("alert")) {
+        get("alert").checked = settings.alert ?? defaultSettings.alert;
+    }
 
     // NOTIFICATION
-
-    get("soundNotification").checked =
-        settings.soundNotification ?? defaultSettings.soundNotification;
-
-
-    // BACKUP
-
-
-    // RETENTION
-
+    if (get("soundNotification")) {
+        get("soundNotification").checked = settings.soundNotification ?? defaultSettings.soundNotification;
+    }
 
     // APPLY THEME
-    applyTheme(settings.theme);
-
+    if (typeof applyTheme === 'function') applyTheme(settings.theme);
 
     // APPLY LANGUAGE
-    applyLanguage(settings.language);
-
+    if (typeof applyLanguage === 'function') applyLanguage(settings.language);
 
     console.log("NMS Settings Loaded", settings);
 }
@@ -1511,120 +1558,101 @@ function persistCurrentSettings(showMsg = false) {
 }
 
 async function saveSettings() {
-
     const settings = {
-
-        theme: get("theme").value,
-
-        language: get("language").value,
-
+        theme: get("theme") ? get("theme").value : "dark",
+        language: get("language") ? get("language").value : "en",
         timeFormat: get("timeFormat") ? get("timeFormat").value : "24",
-
-        networkMonitoring:
-            get("networkMonitoring").checked,
-
-        networkInterval:
-            get("networkInterval").value,
-
-
-        cameraMonitoring:
-            get("cameraMonitoring").checked,
-
-        cameraInterval:
-            get("cameraInterval").value,
-
-        cameraRetryInterval:
-            parseInt(
-                document.getElementById("cameraRetryInterval").value
-            ),
-        alert:
-            get("alert").checked,
-
-        soundNotification:
-            get("soundNotification").checked,
+        networkMonitoring: get("networkMonitoring") ? get("networkMonitoring").checked : true,
+        networkInterval: get("networkInterval") ? get("networkInterval").value : "10",
+        cameraMonitoring: get("cameraMonitoring") ? get("cameraMonitoring").checked : true,
+        cameraInterval: get("cameraInterval") ? get("cameraInterval").value : "30",
+        cameraRetryInterval: get("cameraRetryInterval") ? parseInt(get("cameraRetryInterval").value, 10) : 120,
+        desktopMonitoring: get("desktopMonitoringSetting") ? get("desktopMonitoringSetting").checked : true,
+        desktopInterval: get("desktopInterval") ? get("desktopInterval").value : "10",
+        alert: get("alert") ? get("alert").checked : true,
+        soundNotification: get("soundNotification") ? get("soundNotification").checked : true,
     };
 
-
     // SAVE TO LOCAL STORAGE
-    localStorage.setItem(
-        "nmsSettings",
-        JSON.stringify(settings)
-    );
-
-
-    // ==========================================
-    // SYNC CCTV SETTINGS WITH BACKEND
-    // ==========================================
+    localStorage.setItem("nmsSettings", JSON.stringify(settings));
 
     const token = localStorage.getItem("access_token");
-
     if (!token) {
-        showMessage("⚠ Login session পাওয়া যায়নি");
+        if (typeof showMessage === 'function') showMessage("⚠ Login session expired");
         return;
     }
 
+    const apiBase = (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL !== undefined && window.APP_CONFIG.API_BASE_URL !== null)
+                    ? window.APP_CONFIG.API_BASE_URL : (typeof NMS_API_BASE !== 'undefined' ? NMS_API_BASE : "");
+
+    // 1. SYNC CAMERA MONITORING SETTINGS TO BACKEND
     try {
+        const cameraResponse = await fetch(`${apiBase}/api/settings/camera`, {
+            method: "PUT",
+            headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${token}`
+            },
+            body: JSON.stringify({
+                camera_monitoring: settings.cameraMonitoring,
+                camera_interval: Number(settings.cameraInterval),
+                camera_retry_interval: Number(settings.cameraRetryInterval)
+            })
+        });
 
-        const cameraResponse = await fetch(
-            window.APP_CONFIG.API_BASE_URL + "/api/settings/camera",
-            {
-                method: "PUT",
-                headers: {
-                    "Content-Type": "application/json",
-                    "Authorization": `Bearer ${token}`
-                },
-                body: JSON.stringify({
-                    camera_monitoring: settings.cameraMonitoring,
-                    camera_interval: Number(settings.cameraInterval),
-                    camera_retry_interval: Number(settings.cameraRetryInterval)
-                })
-            }
-        );
-
-        const cameraData = await cameraResponse.json();
-
+        const cameraData = await cameraResponse.json().catch(() => ({}));
         if (!cameraResponse.ok || !cameraData.success) {
-            throw new Error(
-                cameraData.detail ||
-                cameraData.message ||
-                "CCTV settings sync failed."
-            );
+            console.warn("CCTV settings sync detail:", cameraData);
+        } else {
+            console.log("✅ CCTV settings synced:", cameraData);
         }
-
-        console.log(
-            "✅ CCTV settings synced:",
-            cameraData
-        );
-
     } catch (error) {
-
-        console.error(
-            "CCTV settings sync error:",
-            error
-        );
-
-        showMessage(
-            "⚠ CCTV setting backend-e save hoyni"
-        );
-
-        return;
+        console.error("CCTV settings sync error:", error);
     }
 
-    // APPLY SETTINGS
-    applyTheme(settings.theme);
+    // 2. SYNC NETWORK SETTINGS TO BACKEND
+    try {
+        await syncNetworkSettingsToBackend(false);
+    } catch (error) {
+        console.error("Network settings sync error:", error);
+    }
 
-    applyLanguage(settings.language);
-    updateClock();
+    // 3. SYNC DESKTOP SETTINGS TO BACKEND
+    try {
+        await fetch(`${apiBase}/api/desktops/monitoring`, {
+            method: "PUT",
+            headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${token}`
+            },
+            body: JSON.stringify({
+                enabled: settings.desktopMonitoring,
+                interval: Number(settings.desktopInterval)
+            })
+        });
+    } catch (error) {
+        console.error("Desktop settings sync error:", error);
+    }
 
-    // SYNC SETTINGS WITH BACKEND
-    await syncNetworkSettingsToBackend(false);
-    syncGlobalSettingsToBackend(settings);
+    if (typeof syncGlobalSettingsToBackend === 'function') {
+        syncGlobalSettingsToBackend(settings);
+    }
 
-    // RESTART FRONTEND TIMERS WITH NEW INTERVALS
+    // APPLY THEME & LANGUAGE
+    if (typeof applyTheme === 'function') applyTheme(settings.theme);
+    if (typeof applyLanguage === 'function') applyLanguage(settings.language);
+    if (typeof updateClock === 'function') updateClock();
+
+    // RESTART FRONTEND TIMERS WITH NEW INTERVALS IMMEDIATELY
+    if (typeof resetAutoPingTimers === 'function') resetAutoPingTimers();
     if (typeof startAutoMonitor === 'function') startAutoMonitor();
     if (typeof startBackgroundPinging === 'function') startBackgroundPinging();
 
-    toast(`✓ Settings saved: Network Interval ${settings.networkInterval}s | Camera Interval ${settings.cameraInterval}s`);
+    const netText = formatIntervalDisplay(settings.networkInterval);
+    const camText = formatIntervalDisplay(settings.cameraInterval);
+    const retryText = formatIntervalDisplay(settings.cameraRetryInterval);
+
+    toast(`✓ Settings saved: Devices: ${netText} | CCTV: ${camText}`);
     if (typeof showMessage === 'function') showMessage("✓ Settings saved successfully");
 
     console.log("Settings Saved:", settings);
@@ -1649,6 +1677,8 @@ function resetSettings() {
     if(get("cameraMonitoring")) get("cameraMonitoring").checked = defaultSettings.cameraMonitoring;
     if(get("cameraInterval")) get("cameraInterval").value = defaultSettings.cameraInterval;
     if(get("cameraRetryInterval")) get("cameraRetryInterval").value = defaultSettings.cameraRetryInterval;
+    if(get("desktopMonitoringSetting")) get("desktopMonitoringSetting").checked = defaultSettings.desktopMonitoring;
+    if(get("desktopInterval")) get("desktopInterval").value = defaultSettings.desktopInterval;
     if(get("alert")) get("alert").checked = defaultSettings.alert;
     if(get("soundNotification")) get("soundNotification").checked = defaultSettings.soundNotification;
 
@@ -1711,86 +1741,145 @@ function applyLanguage(language) {
 
 
 // ------------------------------------------
-// SOUND
+// ADVANCED NOTIFICATION CHIME & AUDIO ENGINE
 // ------------------------------------------
 
-function playSound() {
+const NMS_AUDIBLE_CHIME_B64 = "data:audio/wav;base64,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";
 
-    const soundEnabled =
-        get("soundNotification").checked;
+let _sharedAudioCtx = null;
+let _nmsAudioEl = null;
 
+function getNmsAudioElement() {
+    if (!_nmsAudioEl) {
+        _nmsAudioEl = document.getElementById('nmsChimePlayer');
+        if (!_nmsAudioEl) {
+            _nmsAudioEl = document.createElement('audio');
+            _nmsAudioEl.id = 'nmsChimePlayer';
+            _nmsAudioEl.style.display = 'none';
+            _nmsAudioEl.preload = 'auto';
+            document.body.appendChild(_nmsAudioEl);
+        }
+        if (!_nmsAudioEl.src || _nmsAudioEl.src === '' || _nmsAudioEl.src.length < 50) {
+            _nmsAudioEl.src = NMS_AUDIBLE_CHIME_B64;
+        }
+    }
+    return _nmsAudioEl;
+}
 
-    if (!soundEnabled) {
+function getSharedAudioContext() {
+    try {
+        if (!_sharedAudioCtx) {
+            const AudioCtx = window.AudioContext || window.webkitAudioContext;
+            if (AudioCtx) {
+                _sharedAudioCtx = new AudioCtx();
+            }
+        }
+        if (_sharedAudioCtx && _sharedAudioCtx.state === 'suspended') {
+            _sharedAudioCtx.resume().catch(() => {});
+        }
+        return _sharedAudioCtx;
+    } catch (e) {
+        return null;
+    }
+}
+
+// Automatically unlock AudioContext and HTML5 Audio on ANY user gesture
+['click', 'keydown', 'mousedown', 'touchstart'].forEach(eventName => {
+    document.addEventListener(eventName, function unlockAudio() {
+        getSharedAudioContext();
+        try {
+            const el = getNmsAudioElement();
+            if (el && (!el.src || el.src.length < 50)) {
+                el.src = NMS_AUDIBLE_CHIME_B64;
+            }
+        } catch (_) {}
+    }, { passive: true, once: false });
+});
+
+function isSoundNotificationEnabled() {
+    try {
+        const saved = JSON.parse(localStorage.getItem("nmsSettings") || "{}");
+        if (saved.soundNotification !== undefined) {
+            return Boolean(saved.soundNotification);
+        }
+        const toggle = document.getElementById("soundNotification");
+        if (toggle) return toggle.checked;
+    } catch (_) {}
+    return true;
+}
+
+function playSound(forced = false) {
+    const isForced = forced === true || forced === 'forced' || forced === 'alert';
+    if (!isForced && !isSoundNotificationEnabled()) {
+        console.log("🔇 Sound notification is OFF in settings. Audio chime suppressed.");
         return;
     }
 
+    let webaudioPlayed = false;
+    try {
+        const ctx = getSharedAudioContext();
+        if (ctx && ctx.state !== 'suspended') {
+            const now = ctx.currentTime;
+            // Dual-tone chime: Tone 1 (Ding 880Hz) -> Tone 2 (Dong 1175Hz)
+            const osc1 = ctx.createOscillator();
+            const gain1 = ctx.createGain();
+            osc1.type = 'sine';
+            osc1.frequency.setValueAtTime(880, now);
+            gain1.gain.setValueAtTime(0.45, now);
+            gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+            osc1.connect(gain1);
+            gain1.connect(ctx.destination);
+            osc1.start(now);
+            osc1.stop(now + 0.35);
 
-    // ছোট notification beep
-    const audioContext =
-        new (
-            window.AudioContext ||
-            window.webkitAudioContext
-        )();
+            const osc2 = ctx.createOscillator();
+            const gain2 = ctx.createGain();
+            osc2.type = 'sine';
+            osc2.frequency.setValueAtTime(1174.66, now + 0.12);
+            gain2.gain.setValueAtTime(0.45, now + 0.12);
+            gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.50);
+            osc2.connect(gain2);
+            gain2.connect(ctx.destination);
+            osc2.start(now + 0.12);
+            osc2.stop(now + 0.50);
+            webaudioPlayed = true;
+        } else if (ctx && ctx.state === 'suspended') {
+            ctx.resume().catch(() => {});
+        }
+    } catch (err) {
+        console.warn("WebAudio chime notice:", err);
+    }
 
-
-    const oscillator =
-        audioContext.createOscillator();
-
-
-    const gainNode =
-        audioContext.createGain();
-
-
-    oscillator.connect(gainNode);
-
-    gainNode.connect(
-        audioContext.destination
-    );
-
-
-    oscillator.frequency.value = 800;
-
-    oscillator.type = "sine";
-
-
-    gainNode.gain.setValueAtTime(
-        0.2,
-        audioContext.currentTime
-    );
-
-
-    oscillator.start();
-
-
-    oscillator.stop(
-        audioContext.currentTime + 0.15
-    );
+    // Audible Fallback & Guaranteed Playback via HTML5 Audio element
+    try {
+        const audioEl = getNmsAudioElement();
+        if (audioEl) {
+            audioEl.currentTime = 0;
+            const playPromise = audioEl.play();
+            if (playPromise !== undefined) {
+                playPromise.catch(err => {
+                    try {
+                        const freshAudio = new Audio(NMS_AUDIBLE_CHIME_B64);
+                        freshAudio.play().catch(() => {});
+                    } catch (_) {}
+                });
+            }
+        }
+    } catch (_) {}
 }
-
-
-
-// ------------------------------------------
-// TEST SOUND
-// ------------------------------------------
+window.playSound = playSound;
 
 function testSound() {
-
-    if (get("soundNotification").checked) {
-
-        playSound();
-
-        showMessage(
-            "🔊 Sound notification is ON"
-        );
-
-    } else {
-
-        showMessage(
-            "🔇 Sound notification is OFF"
-        );
-
+    playSound(true);
+    const enabled = isSoundNotificationEnabled();
+    const msg = enabled ? "🔊 Playing Alert Chime (Sound ON)" : "🔊 Playing Alert Chime (Forced Test)";
+    if (typeof toast === 'function') {
+        toast(msg);
+    } else if (typeof showMessage === 'function') {
+        showMessage(msg);
     }
 }
+window.testSound = testSound;
 
 
 
@@ -2694,6 +2783,14 @@ function refreshDesktopSummary() {
 function renderDesktopRows(list = desktopData) {
     const tbody = document.querySelector('#desktops table tbody');
     if (!tbody) return;
+    if (!list || list.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding:36px 16px; color:#8ea2b8;">
+            <div style="font-size:15px; font-weight:600; color:#e2e8f0; margin-bottom:6px;">Desktop Monitoring is Paused</div>
+            <div style="font-size:13px; color:#94a3b8;">Click <b>📍 Monitor Location</b> above to select a location and turn monitoring ON.</div>
+        </td></tr>`;
+        refreshDesktopSummary();
+        return;
+    }
     tbody.innerHTML = list.map(d => `
         <tr>
             <td><strong>${d.id}</strong></td>
@@ -2716,6 +2813,16 @@ function renderDesktopRows(list = desktopData) {
             onclick="pingDesktopFromFrontend(${Number(d.backendId || d.id)})"
         >
             PING
+        </button>
+
+        <button
+            type="button"
+            class="table-action"
+            style="background:#0284c7;color:#fff;font-weight:600;padding:4px 8px;border-radius:4px;"
+            title="Toggle Online / Offline Status"
+            onclick="toggleDesktopStatus(${Number(d.backendId || d.id)})"
+        >
+            TOGGLE
         </button>
 
         <button
@@ -2779,15 +2886,26 @@ async function pingDesktopFromFrontend(desktopId, options = {}) {
             throw new Error(data?.detail || data?.message || "Desktop ping failed");
         }
 
-        const index = desktopData.findIndex(
-            d => Number(d.backendId || d.id) === Number(desktopId)
+        let statusChanged = false;
+        const index = (window.desktopData || []).findIndex(
+            d => Number(d.backendId || d.id) === Number(desktopId) || String(d.id) === String(desktopId)
         );
-
         if (index >= 0) {
+            const oldStatus = desktopData[index].status;
+            if (oldStatus && oldStatus !== 'Unknown' && oldStatus !== data.status) {
+                statusChanged = true;
+            }
             desktopData[index].status = data.status;
             desktopData[index].last_latency_ms = data.latency_ms;
             desktopData[index].last_check = data.last_check;
             renderDesktopRows(desktopData);
+        }
+
+        if (statusChanged) {
+            playSound(true);
+            if (typeof loadAlerts === 'function') loadAlerts();
+            if (typeof checkGlobalAlertsWithSound === 'function') checkGlobalAlertsWithSound();
+            if (typeof loadDashboardStats === 'function') loadDashboardStats();
         }
 
         if (!options.silent) {
@@ -3881,6 +3999,16 @@ function renderBackendCameras(
                                 PING
                             </button>
 
+                            <button
+                                type="button"
+                                class="table-action"
+                                style="background:#0284c7;color:#fff;font-weight:600;padding:4px 8px;border-radius:4px;"
+                                title="Toggle Online / Offline Status"
+                                onclick="toggleCameraStatus(${camera.id})"
+                            >
+                                TOGGLE
+                            </button>
+
                           <button 
     type="button" 
     class="device-delete-btn" 
@@ -4160,8 +4288,13 @@ async function pingCameraFromFrontend(cameraId, options = {}) {
             toast(`${isOnline ? "✅" : "❌"} ${data.camera_code || "Camera"} → ${data.status} • ${data.latency_ms ?? "-"} ms`);
         }
 
+        let statusChanged = false;
         const index = backendCameras.findIndex(c => Number(c.id) === Number(cameraId));
         if (index >= 0) {
+            const oldStatus = backendCameras[index].status;
+            if (oldStatus && oldStatus !== 'Unknown' && oldStatus !== data.status) {
+                statusChanged = true;
+            }
             backendCameras[index].status = data.status;
             backendCameras[index].last_latency_ms = data.latency_ms;
             backendCameras[index].total_checks = data.total_checks;
@@ -4174,6 +4307,13 @@ async function pingCameraFromFrontend(cameraId, options = {}) {
             }
         } else if (!options.silent) {
             await loadCamerasFromBackend();
+        }
+
+        if (statusChanged) {
+            playSound(true);
+            if (typeof loadAlerts === 'function') loadAlerts();
+            if (typeof checkGlobalAlertsWithSound === 'function') checkGlobalAlertsWithSound();
+            if (typeof loadDashboardStats === 'function') loadDashboardStats();
         }
 
         return data;
@@ -4577,6 +4717,24 @@ if (generateReportBtn) {
 
 }
 
+if (reportFromDate) {
+    reportFromDate.addEventListener("change", function () {
+        if (reportFromDate.value && reportToDate.value && reportFromDate.value <= reportToDate.value) {
+            generateNMSReport();
+        }
+    });
+}
+
+if (reportToDate) {
+    reportToDate.addEventListener("change", function () {
+        if (reportFromDate.value && reportToDate.value && reportFromDate.value <= reportToDate.value) {
+            generateNMSReport();
+        }
+    });
+}
+
+window.generateNMSReport = generateNMSReport;
+
 
 async function generateNMSReport() {
 
@@ -4801,8 +4959,8 @@ function renderAnalyticsTable(data) {
             <td><b>${escapeHtml(device.id)}</b></td>
             <td>${escapeHtml(device.name)}</td>
             <td>${escapeHtml(device.type)}</td>
-            <td><span class="${statusClass}">${escapeHtml(device.status)}</span></td>
             <td>${escapeHtml(device.ip)}</td>
+            <td><span class="${statusClass}">${escapeHtml(device.status)}</span></td>
             <td title="${escapeHtml(tooltipTitle)}">${escapeHtml(device.uptime)}</td>
             <td><small>${escapeHtml(device.lastChecked)}</small></td>
         `;
@@ -4893,13 +5051,13 @@ function renderReportTable() {
 
             <td>${device.type}</td>
 
+            <td>${device.ip}</td>
+
             <td>
                 <span class="${statusClass}">
                     ${device.status}
                 </span>
             </td>
-
-            <td>${device.ip}</td>
 
             <td>${device.uptime}</td>
 
@@ -5364,69 +5522,48 @@ async function downloadZipReport() {
 
 
 // ===============================
-// BUTTON CONNECTION
+// BUTTON CONNECTION & EXPORTS
 // ===============================
 
-document.addEventListener("DOMContentLoaded", function () {
+window.downloadCSVReport = downloadCSVReport;
+window.downloadExcelReport = downloadExcelReport;
+window.downloadZipReport = downloadZipReport;
 
-    const csvButton =
-        document.getElementById("downloadCSV");
+function initReportButtons() {
+    const csvButton = document.getElementById("downloadCSV");
+    const excelButton = document.getElementById("downloadExcel");
+    const zipButton = document.getElementById("downloadZIP");
 
-    const excelButton =
-        document.getElementById("downloadExcel");
-
-    const zipButton =
-        document.getElementById("downloadZIP");
-
-
-    if (csvButton) {
-
-        csvButton.addEventListener(
-            "click",
-            function (event) {
-
-                event.preventDefault();
-
-                downloadCSVReport();
-
-            }
-        );
-
+    if (csvButton && !csvButton._hasReportListener) {
+        csvButton._hasReportListener = true;
+        csvButton.addEventListener("click", function (event) {
+            event.preventDefault();
+            downloadCSVReport();
+        });
     }
 
-
-    if (excelButton) {
-
-        excelButton.addEventListener(
-            "click",
-            function (event) {
-
-                event.preventDefault();
-
-                downloadExcelReport();
-
-            }
-        );
-
+    if (excelButton && !excelButton._hasReportListener) {
+        excelButton._hasReportListener = true;
+        excelButton.addEventListener("click", function (event) {
+            event.preventDefault();
+            downloadExcelReport();
+        });
     }
 
-
-    if (zipButton) {
-
-        zipButton.addEventListener(
-            "click",
-            function (event) {
-
-                event.preventDefault();
-
-                downloadZipReport();
-
-            }
-        );
-
+    if (zipButton && !zipButton._hasReportListener) {
+        zipButton._hasReportListener = true;
+        zipButton.addEventListener("click", function (event) {
+            event.preventDefault();
+            downloadZipReport();
+        });
     }
+}
 
-});
+if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", initReportButtons);
+} else {
+    initReportButtons();
+}
 
 // =====================================
 // CLEAR REPORTS HISTORY
@@ -5812,15 +5949,27 @@ async function pingDeviceFromFrontend(deviceId, options = {}) {
             );
         }
 
+        let statusChanged = false;
         const index = backendDevices.findIndex(
             device => Number(device.id) === Number(deviceId)
         );
 
         if (index >= 0) {
+            const oldStatus = backendDevices[index].status;
+            if (oldStatus && oldStatus !== 'Unknown' && oldStatus !== data.status) {
+                statusChanged = true;
+            }
             backendDevices[index].status = data.status;
             backendDevices[index].last_latency_ms = data.latency_ms;
             backendDevices[index].last_check = data.last_check;
             renderBackendDevices(backendDevices);
+        }
+
+        if (statusChanged) {
+            playSound(true);
+            if (typeof loadAlerts === 'function') loadAlerts();
+            if (typeof checkGlobalAlertsWithSound === 'function') checkGlobalAlertsWithSound();
+            if (typeof loadDashboardStats === 'function') loadDashboardStats();
         }
 
         console.log("Ping Result:", data);
@@ -6167,22 +6316,8 @@ async function setDesktopMonitoringState(enabled) {
     }
 
     const newState = Boolean(enabled);
-
-    /*
-     * Monitoring ON করতে হলে আগে location লাগবে.
-     */
-    if (
-        newState &&
-        !selectedDesktopMonitoringLocation
-    ) {
-
-        alert(
-            'Please select a desktop location first.'
-        );
-
-        updateDesktopMonitoringUI();
-
-        return;
+    if (!selectedDesktopMonitoringLocation) {
+        selectedDesktopMonitoringLocation = "All Locations";
     }
 
     try {
@@ -6191,32 +6326,20 @@ async function setDesktopMonitoringState(enabled) {
             `${NMS_API_BASE}/api/desktops/monitoring`,
             {
                 method: 'PUT',
-
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization':
-                        `Bearer ${token}`
+                    'Authorization': `Bearer ${token}`
                 },
-
                 body: JSON.stringify({
                     enabled: newState,
-                    selected_location:
-                        newState
-                            ? selectedDesktopMonitoringLocation
-                            : null
+                    selected_location: newState ? selectedDesktopMonitoringLocation : null
                 })
             }
         );
 
         const data = await response.json();
 
-        console.log(
-            'Desktop monitoring backend response:',
-            data
-        );
-
         if (!response.ok || !data.success) {
-
             throw new Error(
                 data.detail ||
                 data.message ||
@@ -6224,55 +6347,21 @@ async function setDesktopMonitoringState(enabled) {
             );
         }
 
-        /*
-         * Backend successfully saved the state.
-         */
-        desktopMonitoringEnabled =
-            newState;
-
+        desktopMonitoringEnabled = newState;
         localStorage.setItem(
             'desktopMonitoringEnabled',
             String(newState)
         );
 
-        if (!newState) {
-
-            /*
-             * Monitoring OFF হলে table-ও empty হবে.
-             */
-            renderDesktopRows([]);
-
-        } else {
-
-            /*
-             * Selected location-এর desktop দেখাবে.
-             */
-            const selectedLocation =
-                String(
-                    selectedDesktopMonitoringLocation
-                )
-                    .trim()
-                    .toLowerCase();
-
-            const filteredDesktops =
-                desktopData.filter(
-                    function (desktop) {
-
-                        return String(
-                            desktop.location || ''
-                        )
-                            .trim()
-                            .toLowerCase() ===
-                            selectedLocation;
-                    }
-                );
-
-            renderDesktopRows(
-                filteredDesktops
-            );
-        }
-
         updateDesktopMonitoringUI();
+
+        if (newState) {
+            toast(`🟢 Desktop monitoring ON: ${selectedDesktopMonitoringLocation}`);
+            triggerAutoPingAllDesktops(false);
+        } else {
+            toast("🔴 Desktop monitoring OFF");
+            renderDesktopRows([]);
+        }
 
         console.log(
             newState
@@ -6287,13 +6376,7 @@ async function setDesktopMonitoringState(enabled) {
             error
         );
 
-        /*
-         * Backend update failed হলে
-         * checkbox আগের অবস্থায় ফিরবে.
-         */
-        desktopMonitoringEnabled =
-            !newState;
-
+        desktopMonitoringEnabled = !newState;
         updateDesktopMonitoringUI();
 
         alert(
@@ -6422,16 +6505,14 @@ async function loadDesktopMonitoringState() {
                     .toLowerCase();
 
             const filteredDesktops =
-                desktopData.filter(function (desktop) {
-
-                    return String(
-                        desktop.location || ''
-                    )
-                        .trim()
-                        .toLowerCase() ===
-                        selectedLocation;
-
-                });
+                (!selectedLocation || selectedLocation === 'all' || selectedLocation === 'all locations')
+                    ? desktopData
+                    : desktopData.filter(function (desktop) {
+                        return String(desktop.location || '')
+                            .trim()
+                            .toLowerCase() ===
+                            selectedLocation;
+                    });
 
             renderDesktopRows(
                 filteredDesktops
@@ -6541,14 +6622,14 @@ function renderDesktopLocationOptions(
         searchText
     ).trim().toLowerCase();
 
-    const locations =
-        getDesktopLocations().filter(
-            function (location) {
-                return location
-                    .toLowerCase()
-                    .includes(query);
-            }
-        );
+    const rawLocations = getDesktopLocations();
+    let locations = ["All Locations", ...rawLocations.filter(loc => loc.toLowerCase() !== "all locations")];
+
+    if (query) {
+        locations = locations.filter(function (location) {
+            return location.toLowerCase().includes(query);
+        });
+    }
 
     if (!locations.length) {
 
@@ -6573,8 +6654,9 @@ function renderDesktopLocationOptions(
             function (location) {
 
                 const isSelected =
-                    selectedDesktopMonitoringLocation ===
-                    location;
+                    (selectedDesktopMonitoringLocation &&
+                     selectedDesktopMonitoringLocation.toLowerCase() === location.toLowerCase()) ||
+                    (!selectedDesktopMonitoringLocation && location === "All Locations");
 
                 return `
                     <button
@@ -6583,7 +6665,9 @@ function renderDesktopLocationOptions(
                         data-location="${location}"
                         style="
                             width:100%;
-                            display:block;
+                            display:flex;
+                            align-items:center;
+                            justify-content:space-between;
                             text-align:left;
                             padding:12px 14px;
                             margin-bottom:8px;
@@ -6595,7 +6679,8 @@ function renderDesktopLocationOptions(
                             font-size:14px;
                         "
                     >
-                        📍 ${location}
+                        <span>📍 ${location}</span>
+                        ${isSelected ? '<span style="color:#38bdf8; font-size:12px; font-weight:600;">✓ Active</span>' : ''}
                     </button>
                 `;
             }
@@ -6636,12 +6721,7 @@ function renderDesktopLocationOptions(
 async function applyDesktopMonitoringLocation() {
 
     if (!selectedDesktopMonitoringLocation) {
-
-        alert(
-            "Please select a desktop location first."
-        );
-
-        return;
+        selectedDesktopMonitoringLocation = "All Locations";
     }
 
     const token =
@@ -6662,12 +6742,6 @@ async function applyDesktopMonitoringLocation() {
 
     try {
 
-        /*
-         * Backend-এ selected location save হবে.
-         *
-         * Monitoring ON/OFF state
-         * এখন change করছি না.
-         */
         const response = await fetch(
             `${NMS_API_BASE}/api/desktops/monitoring`,
             {
@@ -6692,11 +6766,6 @@ async function applyDesktopMonitoringLocation() {
         const data =
             await response.json();
 
-        console.log(
-            "Desktop location backend response:",
-            data
-        );
-
         if (
             !response.ok ||
             !data.success
@@ -6709,9 +6778,6 @@ async function applyDesktopMonitoringLocation() {
             );
         }
 
-        /*
-         * Frontend state
-         */
         selectedDesktopMonitoringLocation =
             selectedLocation;
 
@@ -6720,9 +6786,6 @@ async function applyDesktopMonitoringLocation() {
             selectedLocation
         );
 
-        /*
-         * Button update
-         */
         const button =
             document.getElementById(
                 "desktopLocationBtn"
@@ -6735,15 +6798,19 @@ async function applyDesktopMonitoringLocation() {
                 selectedLocation;
         }
 
-        /*
-         * Always display all desktops in inventory.
-         */
-        renderDesktopRows(desktopData);
-
-        /*
-         * Modal close
-         */
         closeDesktopLocationModal();
+
+        if (desktopMonitoringEnabled) {
+            toast(`📍 Desktop monitoring active for: ${selectedLocation}`);
+            triggerAutoPingAllDesktops(false);
+        } else {
+            toast("🔴 Desktop monitoring is currently OFF");
+            const loc = String(selectedLocation).trim().toLowerCase();
+            const filtered = (!loc || loc === 'all' || loc === 'all locations')
+                ? desktopData
+                : desktopData.filter(d => String(d.location || '').trim().toLowerCase() === loc);
+            renderDesktopRows(filtered);
+        }
 
         console.log(
             "✅ Desktop monitoring location saved:",
@@ -6928,6 +6995,37 @@ document.addEventListener(
 
         loadDesktopMonitoringState();
 
+        const soundToggle = document.getElementById("soundNotification");
+        soundToggle?.addEventListener("change", function () {
+            let settings = {};
+            try { settings = JSON.parse(localStorage.getItem("nmsSettings") || "{}"); } catch (e) {}
+            settings.soundNotification = this.checked;
+            localStorage.setItem("nmsSettings", JSON.stringify(settings));
+
+            if (this.checked) {
+                toast("🔊 Sound notification enabled");
+                playSound(true);
+            } else {
+                toast("🔇 Sound notification muted");
+            }
+
+            if (typeof syncGlobalSettingsToBackend === 'function') {
+                syncGlobalSettingsToBackend(settings);
+            }
+        });
+
+        const alertToggle = document.getElementById("alert");
+        alertToggle?.addEventListener("change", function () {
+            let settings = {};
+            try { settings = JSON.parse(localStorage.getItem("nmsSettings") || "{}"); } catch (e) {}
+            settings.alert = this.checked;
+            localStorage.setItem("nmsSettings", JSON.stringify(settings));
+            toast(this.checked ? "🚨 Alert system enabled" : "⚠️ Alert system disabled");
+
+            if (typeof syncGlobalSettingsToBackend === 'function') {
+                syncGlobalSettingsToBackend(settings);
+            }
+        });
     }
 );
 
@@ -6953,9 +7051,9 @@ async function loadDashboardStats() {
                 }
                 
                 let prevAlertCount = window.lastKnownAlertCount !== undefined ? window.lastKnownAlertCount : data.active_alerts;
-                if (data.active_alerts > prevAlertCount && enableAlerts) {
-                    toast("?? New system alert received!");
-                    if (typeof playSound === "function") playSound();
+                if (data.active_alerts > prevAlertCount && enableAlerts && isSoundNotificationEnabled()) {
+                    if (typeof toast === "function") toast("⚠️ New system alert detected!");
+                    if (typeof playSound === "function") playSound(true);
                 }
                 window.lastKnownAlertCount = data.active_alerts;
 
@@ -7037,7 +7135,8 @@ async function loadDashboardStats() {
                     let enableAlerts = true;
                     try { const s = JSON.parse(localStorage.getItem('nmsSettings') || '{}'); if(s.alert === false) enableAlerts = false; } catch(e){}
                     alList.innerHTML = '';
-                    const alerts = enableAlerts ? alData.alerts.slice(0, 4) : [];
+                    const activeAlerts = (alData.alerts || []).filter(a => a.status === 'New');
+                    const alerts = enableAlerts ? activeAlerts.slice(0, 4) : [];
                     if (alerts.length === 0) {
                         alList.innerHTML = '<div style="padding:20px;text-align:center;color:#688097">No recent alerts. Everything is healthy.</div>';
                     } else {
@@ -7159,30 +7258,87 @@ async function loadNetworkMap() {
 }
 
 
+window._alertViewMode = window._alertViewMode || 'active';
+
+window.setAlertView = function(mode) {
+    window._alertViewMode = mode;
+    const tabActive = document.getElementById('alertTabActive');
+    const tabAll = document.getElementById('alertTabAll');
+    if (tabActive) {
+        tabActive.style.borderBottom = mode === 'active' ? '2px solid #51b7f7' : '2px solid transparent';
+        tabActive.style.color = mode === 'active' ? '#51b7f7' : '#64798e';
+    }
+    if (tabAll) {
+        tabAll.style.borderBottom = mode === 'all' ? '2px solid #51b7f7' : '2px solid transparent';
+        tabAll.style.color = mode === 'all' ? '#51b7f7' : '#64798e';
+    }
+    loadAlerts();
+};
+
 async function loadAlerts() {
     try {
         const token = localStorage.getItem('access_token');
         if (!token) return;
-        const res = await fetch(NMS_API_BASE + '/api/alerts?_t=' + Date.now(), { headers: { 'Authorization': 'Bearer ' + token } });
+        const apiBase = (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL) || (typeof NMS_API_BASE !== 'undefined' ? NMS_API_BASE : '');
+        const res = await fetch(`${apiBase}/api/alerts?_t=${Date.now()}`, { headers: { 'Authorization': 'Bearer ' + token } });
         if (res.ok) {
             const data = await res.json();
-            if (data.success) {
+            if (data.success && Array.isArray(data.alerts)) {
                 let enableAlerts = true;
                 try { const s = JSON.parse(localStorage.getItem('nmsSettings') || '{}'); if(s.alert === false) enableAlerts = false; } catch(e){}
                 if(!enableAlerts) data.alerts = [];
+
+                // Count active 'New' alerts for sidebar, header, and dashboard badges
+                const activeAlerts = data.alerts.filter(a => a.status === 'New');
+                const sbAlerts = document.getElementById('sidebarAlertsCount');
+                const hrAlerts = document.getElementById('headerAlertsCount');
+                const dashAlerts = document.getElementById('dashAlerts');
+                const repAlerts = document.getElementById('reportActiveAlerts');
+                if (sbAlerts) sbAlerts.textContent = activeAlerts.length;
+                if (hrAlerts) hrAlerts.textContent = activeAlerts.length;
+                if (dashAlerts) dashAlerts.textContent = activeAlerts.length;
+                if (repAlerts) repAlerts.textContent = activeAlerts.length;
+
+                // Update tab counters
+                const activeBadge = document.getElementById('alertActiveBadge');
+                const allBadge = document.getElementById('alertAllBadge');
+                if (activeBadge) activeBadge.textContent = activeAlerts.length;
+                if (allBadge) allBadge.textContent = data.alerts.length;
 
                 const alertList = document.querySelector('.incident-list');
                 if (!alertList) return;
                 alertList.innerHTML = '';
                 
-                if (data.alerts.length === 0) {
-                    alertList.innerHTML = '<div style="padding:40px;text-align:center;color:#688097;font-size:16px;"><b>No Active Alerts</b><br><br><small>Everything is healthy and operational.</small></div>';
+                const currentMode = window._alertViewMode || 'active';
+                const displayAlerts = currentMode === 'active' ? activeAlerts : data.alerts;
+
+                if (displayAlerts.length === 0) {
+                    if (currentMode === 'active') {
+                        alertList.innerHTML = `
+                            <div style="padding:48px 20px;text-align:center;color:#688097;">
+                                <div style="font-size:42px;color:#10b981;margin-bottom:12px;line-height:1;">✓</div>
+                                <b style="font-size:18px;color:#eff5fb;display:block;margin-bottom:8px;">No Active Alerts</b>
+                                <p style="font-size:13px;color:#64798e;margin:0;">All infrastructure incidents have been acknowledged & cleared. Everything is healthy and operational.</p>
+                            </div>
+                        `;
+                    } else {
+                        alertList.innerHTML = `
+                            <div style="padding:48px 20px;text-align:center;color:#688097;">
+                                <div style="font-size:36px;color:#3b82f6;margin-bottom:12px;line-height:1;">ℹ</div>
+                                <b style="font-size:16px;color:#eff5fb;display:block;margin-bottom:6px;">No Alert History</b>
+                                <p style="font-size:13px;color:#64798e;margin:0;">No previous alert incidents recorded in database.</p>
+                            </div>
+                        `;
+                    }
                     return;
                 }
                 
-                data.alerts.forEach(a => {
+                displayAlerts.forEach(a => {
+                    const isNew = a.status === 'New';
                     const cssBg = a.severity === 'Critical' ? 'critical-bg' : (a.severity === 'Warning' ? 'warning-bg' : 'info-bg');
                     const cssBorder = a.severity === 'Critical' ? 'critical-border' : (a.severity === 'Warning' ? 'warning-border' : 'info-border');
+                    const statusBadgeClass = isNew ? (a.severity === 'Critical' ? 'critical-bg' : 'warning-bg') : (a.status === 'Acknowledged' ? 'warning-bg' : 'info-bg');
+                    const statusLabel = isNew ? '● ACTIVE' : (a.status || 'LOGGED').toUpperCase();
                     const createdDate = new Date(a.created_at);
                     
                     // Format relative time
@@ -7208,16 +7364,16 @@ async function loadAlerts() {
                     }
 
                     // Find location from frontend state
-                    let loc = "Unknown Location";
+                    let loc = "Plant Infrastructure";
                     if (typeof backendDevices !== 'undefined') {
                         const dev = backendDevices.find(d => d.device_code === a.source_name);
                         if (dev && dev.location) loc = dev.location;
                     }
-                    if (loc === "Unknown Location" && typeof backendCameras !== 'undefined') {
+                    if (loc === "Plant Infrastructure" && typeof backendCameras !== 'undefined') {
                         const cam = backendCameras.find(c => c.camera_code === a.source_name);
                         if (cam && cam.location) loc = cam.location;
                     }
-                    if (loc === "Unknown Location" && typeof desktopData !== 'undefined') {
+                    if (loc === "Plant Infrastructure" && typeof desktopData !== 'undefined') {
                         const desk = desktopData.find(d => d.id === a.source_name);
                         if (desk && desk.location) loc = desk.location;
                     }
@@ -7227,10 +7383,10 @@ async function loadAlerts() {
 
                     let cleanMsg = a.message;
                     
-                    alertList.innerHTML += '<div class="incident ' + cssBorder + '">' +
+                    alertList.innerHTML += '<div class="incident ' + cssBorder + '" style="' + (isNew ? 'box-shadow: 0 0 12px rgba(239,68,68,0.18); border-left-width: 4px;' : 'opacity:0.85;') + '">' +
                         '<div class="severity ' + cssBg + '">' + a.severity.toUpperCase() + '</div>' +
-                        '<div><h3 style="margin-bottom:5px;">' + cleanMsg + '</h3><p style="font-size:12px; color:#a2b5cd;">' + detailsStr + '</p></div>' +
-                        '<div class="severity info-bg">' + a.status + '</div>' +
+                        '<div style="flex:1;"><h3 style="margin-bottom:5px;">' + cleanMsg + '</h3><p style="font-size:12px; color:#a2b5cd;">' + detailsStr + '</p></div>' +
+                        '<div class="severity ' + statusBadgeClass + '" style="font-weight:700;">' + statusLabel + '</div>' +
                         '</div>';
                 });
             }
@@ -7241,13 +7397,99 @@ async function loadAlerts() {
 window.ackAlerts = async function () {
     try {
         const token = localStorage.getItem('access_token');
-        const res = await fetch(NMS_API_BASE + '/api/alerts/acknowledge', { method: 'PUT', headers: { 'Authorization': 'Bearer ' + token } });
-        if (res.ok) {
-            toast('All alerts acknowledged');
-            loadAlerts();
-            loadDashboardStats();
+        const apiBase = (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL) || (typeof NMS_API_BASE !== 'undefined' ? NMS_API_BASE : '');
+        
+        // Immediate optimistic clearing across ALL UI locations
+        const sbAlerts = document.getElementById('sidebarAlertsCount');
+        const hrAlerts = document.getElementById('headerAlertsCount');
+        const dashAlerts = document.getElementById('dashAlerts');
+        const repAlerts = document.getElementById('reportActiveAlerts');
+        const actBadge = document.getElementById('alertActiveBadge');
+        if (sbAlerts) sbAlerts.textContent = '0';
+        if (hrAlerts) hrAlerts.textContent = '0';
+        if (dashAlerts) dashAlerts.textContent = '0';
+        if (repAlerts) repAlerts.textContent = '0';
+        if (actBadge) actBadge.textContent = '0';
+
+        const dashSub = document.querySelector('#dashAlerts + span, #dashAlerts ~ span');
+        if (dashSub) {
+            dashSub.textContent = 'All systems normal';
+            dashSub.className = 'positive';
         }
-    } catch (err) { }
+
+        const alList = document.getElementById('dashAlertsList');
+        if (alList) {
+            alList.innerHTML = '<div style="padding:20px;text-align:center;color:#688097">No recent alerts. Everything is healthy.</div>';
+        }
+
+        const alertList = document.querySelector('.incident-list');
+        if (alertList && (!window._alertViewMode || window._alertViewMode === 'active')) {
+            alertList.innerHTML = `
+                <div style="padding:48px 20px;text-align:center;color:#688097;">
+                    <div style="font-size:42px;color:#10b981;margin-bottom:12px;line-height:1;">✓</div>
+                    <b style="font-size:18px;color:#eff5fb;display:block;margin-bottom:8px;">No Active Alerts</b>
+                    <p style="font-size:13px;color:#64798e;margin:0;">All infrastructure incidents have been acknowledged & cleared. Everything is healthy and operational.</p>
+                </div>
+            `;
+        }
+
+        const res = await fetch(`${apiBase}/api/alerts/acknowledge`, { method: 'PUT', headers: { 'Authorization': 'Bearer ' + token } });
+        if (res.ok) {
+            toast('✓ All alerts acknowledged & cleared');
+            await loadAlerts();
+            if (typeof loadDashboardStats === 'function') loadDashboardStats();
+            if (typeof checkGlobalAlertsWithSound === 'function') checkGlobalAlertsWithSound();
+        }
+    } catch (err) {
+        console.error("ackAlerts error:", err);
+    }
+};
+
+window.clearAllAlerts = async function () {
+    try {
+        const token = localStorage.getItem('access_token');
+        const apiBase = (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL) || (typeof NMS_API_BASE !== 'undefined' ? NMS_API_BASE : '');
+        
+        // Immediate optimistic clearing across all locations
+        const sbAlerts = document.getElementById('sidebarAlertsCount');
+        const hrAlerts = document.getElementById('headerAlertsCount');
+        const dashAlerts = document.getElementById('dashAlerts');
+        const repAlerts = document.getElementById('reportActiveAlerts');
+        const actBadge = document.getElementById('alertActiveBadge');
+        const allBadge = document.getElementById('alertAllBadge');
+        if (sbAlerts) sbAlerts.textContent = '0';
+        if (hrAlerts) hrAlerts.textContent = '0';
+        if (dashAlerts) dashAlerts.textContent = '0';
+        if (repAlerts) repAlerts.textContent = '0';
+        if (actBadge) actBadge.textContent = '0';
+        if (allBadge) allBadge.textContent = '0';
+
+        const alList = document.getElementById('dashAlertsList');
+        if (alList) {
+            alList.innerHTML = '<div style="padding:20px;text-align:center;color:#688097">No recent alerts. Everything is healthy.</div>';
+        }
+
+        const alertList = document.querySelector('.incident-list');
+        if (alertList) {
+            alertList.innerHTML = `
+                <div style="padding:48px 20px;text-align:center;color:#688097;">
+                    <div style="font-size:42px;color:#10b981;margin-bottom:12px;line-height:1;">✓</div>
+                    <b style="font-size:18px;color:#eff5fb;display:block;margin-bottom:8px;">No Active Alerts</b>
+                    <p style="font-size:13px;color:#64798e;margin:0;">All alert records have been completely cleared.</p>
+                </div>
+            `;
+        }
+
+        const res = await fetch(`${apiBase}/api/alerts/clear`, { method: 'POST', headers: { 'Authorization': 'Bearer ' + token } });
+        if (res.ok) {
+            toast('✓ All alerts cleared successfully');
+            await loadAlerts();
+            if (typeof loadDashboardStats === 'function') loadDashboardStats();
+            if (typeof checkGlobalAlertsWithSound === 'function') checkGlobalAlertsWithSound();
+        }
+    } catch (err) {
+        console.error("clearAllAlerts error:", err);
+    }
 };
 
 // Reports Unified Linkage
@@ -7261,82 +7503,442 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 
-// --- AUTO MONITORING FIX ---
-let autoMonitorIntervalId = null;
+// =========================================================
+// REAL-TIME AUTO-PING & COUNTDOWN ENGINE
+// Supports: Devices, CCTV Cameras, Desktops
+// Dynamic Settings Interval, Live Visual Countdown, Batch Ping Execution
+// =========================================================
 
+let autoPingEngineTimerId = null;
+let devicePingCountdown = 10;
+let cameraPingCountdown = 30;
+let desktopPingCountdown = 10;
+let isPingingDevices = false;
+let isPingingCameras = false;
+let isPingingDesktops = false;
+
+function getAutoPingIntervals() {
+    let s = {};
+    try { s = JSON.parse(localStorage.getItem('nmsSettings') || '{}'); } catch(e){}
+    return {
+        networkEnabled: s.networkMonitoring !== false,
+        networkInterval: Math.max(3, parseInt(s.networkInterval, 10) || 10),
+        cameraEnabled: s.cameraMonitoring !== false,
+        cameraInterval: Math.max(3, parseInt(s.cameraInterval, 10) || 30)
+    };
+}
+
+function resetAutoPingTimers() {
+    const cfg = getAutoPingIntervals();
+    devicePingCountdown = cfg.networkInterval;
+    cameraPingCountdown = cfg.cameraInterval;
+    updateAutoPingBannerUI();
+}
+window.resetAutoPingTimers = resetAutoPingTimers;
+
+function updateAutoPingBannerUI() {
+    const cfg = getAutoPingIntervals();
+
+    // 1. DEVICES BANNER
+    const devBadge = document.getElementById('devicesIntervalBadge');
+    const devCount = document.getElementById('devicesCountdownBadge');
+    const devDot = document.getElementById('devicesPulseDot');
+    if (devBadge) devBadge.innerHTML = `Interval: <b>${formatIntervalDisplay(cfg.networkInterval)}</b>`;
+    if (devCount) {
+        if (!cfg.networkEnabled) {
+            devCount.className = 'auto-ping-badge';
+            devCount.innerHTML = '⏸ Paused (Disabled in Settings)';
+            if (devDot) devDot.style.background = '#64748b';
+        } else if (!isPingingDevices) {
+            devCount.className = 'auto-ping-badge';
+            devCount.innerHTML = `Next ping in <b id="devicesCountdownText">${devicePingCountdown}s</b>`;
+            if (devDot) devDot.style.background = '#10b981';
+        }
+    }
+
+    // 2. CAMERAS BANNER
+    const camBadge = document.getElementById('camerasIntervalBadge');
+    const camCount = document.getElementById('camerasCountdownBadge');
+    const camDot = document.getElementById('camerasPulseDot');
+    if (camBadge) camBadge.innerHTML = `Interval: <b>${formatIntervalDisplay(cfg.cameraInterval)}</b>`;
+    if (camCount) {
+        if (!cfg.cameraEnabled) {
+            camCount.className = 'auto-ping-badge';
+            camCount.innerHTML = '⏸ Paused (Disabled in Settings)';
+            if (camDot) camDot.style.background = '#64748b';
+        } else if (!isPingingCameras) {
+            camCount.className = 'auto-ping-badge';
+            camCount.innerHTML = `Next ping in <b id="camerasCountdownText">${cameraPingCountdown}s</b>`;
+            if (camDot) camDot.style.background = '#10b981';
+        }
+    }
+}
+
+// BATCH PING DEVICES
+async function triggerAutoPingAllDevices(isManual = false) {
+    if (isPingingDevices) return;
+    const token = localStorage.getItem('access_token');
+    if (!token) return;
+
+    isPingingDevices = true;
+    const countBadge = document.getElementById('devicesCountdownBadge');
+    const btn = document.getElementById('triggerDevicesPingBtn');
+    if (countBadge) {
+        countBadge.className = 'auto-ping-badge is-pinging';
+        countBadge.innerHTML = '⚡ Pinging all devices...';
+    }
+    if (btn) btn.disabled = true;
+
+    try {
+        const apiBase = (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL) || (typeof NMS_API_BASE !== 'undefined' ? NMS_API_BASE : '');
+        const res = await fetch(`${apiBase}/api/devices/ping-all`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.success && Array.isArray(data.devices)) {
+            const prevStatusMap = new Map((window.backendDevices || []).map(d => [d.device_code || d.id, d.status]));
+            let transitionOccurred = false;
+
+            for (const d of data.devices) {
+                const key = d.device_code || d.id;
+                const oldSt = prevStatusMap.get(key);
+                if (oldSt && oldSt !== 'Unknown' && oldSt !== d.status) {
+                    transitionOccurred = true;
+                    const icon = d.status === 'Online' ? '✅' : '🚨';
+                    toast(`${icon} Device ${d.device_code} (${d.device_name || 'Switch'}) is now ${d.status}`);
+                }
+            }
+
+            window.backendDevices = data.devices;
+            if (typeof renderBackendDevices === 'function') {
+                renderBackendDevices(window.backendDevices);
+            }
+            if (typeof loadDashboardStats === 'function') {
+                loadDashboardStats();
+            }
+
+            if (transitionOccurred) {
+                playSound(true);
+                if (typeof loadAlerts === 'function') loadAlerts();
+                if (typeof checkGlobalAlertsWithSound === 'function') checkGlobalAlertsWithSound();
+            }
+
+            const nowTime = new Date().toLocaleTimeString();
+            const lastSync = document.getElementById('devicesLastSyncText');
+            if (lastSync) lastSync.textContent = `✓ Synced at ${nowTime}`;
+            if (isManual) toast(`✓ All ${data.devices.length} devices pinged & refreshed`);
+        }
+    } catch (err) {
+        console.warn('Devices auto-ping batch error:', err);
+    } finally {
+        isPingingDevices = false;
+        if (btn) btn.disabled = false;
+        const cfg = getAutoPingIntervals();
+        devicePingCountdown = cfg.networkInterval;
+        updateAutoPingBannerUI();
+    }
+}
+window.triggerAutoPingAllDevices = triggerAutoPingAllDevices;
+
+// BATCH PING CAMERAS
+async function triggerAutoPingAllCameras(isManual = false) {
+    if (isPingingCameras) return;
+    const token = localStorage.getItem('access_token');
+    if (!token) return;
+
+    isPingingCameras = true;
+    const countBadge = document.getElementById('camerasCountdownBadge');
+    const btn = document.getElementById('triggerCamerasPingBtn');
+    if (countBadge) {
+        countBadge.className = 'auto-ping-badge is-pinging';
+        countBadge.innerHTML = '⚡ Pinging all CCTV...';
+    }
+    if (btn) btn.disabled = true;
+
+    try {
+        const apiBase = (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL) || (typeof NMS_API_BASE !== 'undefined' ? NMS_API_BASE : '');
+        const res = await fetch(`${apiBase}/api/cameras/ping-all`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.success && Array.isArray(data.cameras)) {
+            const prevStatusMap = new Map((window.backendCameras || []).map(c => [c.camera_code || c.id, c.status]));
+            let transitionOccurred = false;
+
+            for (const c of data.cameras) {
+                const key = c.camera_code || c.id;
+                const oldSt = prevStatusMap.get(key);
+                if (oldSt && oldSt !== 'Unknown' && oldSt !== c.status) {
+                    transitionOccurred = true;
+                    const icon = c.status === 'Online' ? '✅' : '🚨';
+                    toast(`${icon} CCTV ${c.camera_code} (${c.location || c.camera_name || 'Camera'}) is now ${c.status}`);
+                }
+            }
+
+            window.backendCameras = data.cameras;
+            if (typeof renderBackendCameras === 'function') {
+                renderBackendCameras(window.backendCameras);
+            }
+            if (typeof updateCameraDashboardStats === 'function') {
+                updateCameraDashboardStats(window.backendCameras);
+            }
+            if (typeof loadDashboardStats === 'function') {
+                loadDashboardStats();
+            }
+
+            if (transitionOccurred) {
+                playSound(true);
+                if (typeof loadAlerts === 'function') loadAlerts();
+                if (typeof checkGlobalAlertsWithSound === 'function') checkGlobalAlertsWithSound();
+            }
+
+            const nowTime = new Date().toLocaleTimeString();
+            const lastSync = document.getElementById('camerasLastSyncText');
+            if (lastSync) lastSync.textContent = `✓ Synced at ${nowTime}`;
+            if (isManual) toast(`✓ All ${data.cameras.length} CCTV cameras pinged & refreshed`);
+        }
+    } catch (err) {
+        console.warn('Cameras auto-ping batch error:', err);
+    } finally {
+        isPingingCameras = false;
+        if (btn) btn.disabled = false;
+        const cfg = getAutoPingIntervals();
+        cameraPingCountdown = cfg.cameraInterval;
+        updateAutoPingBannerUI();
+    }
+}
+window.triggerAutoPingAllCameras = triggerAutoPingAllCameras;
+
+// BATCH PING DESKTOPS
+async function triggerAutoPingAllDesktops(isManual = false) {
+    if (isPingingDesktops) return;
+    const token = localStorage.getItem('access_token');
+    if (!token) return;
+
+    isPingingDesktops = true;
+    const countBadge = document.getElementById('desktopsCountdownBadge');
+    const btn = document.getElementById('triggerDesktopsPingBtn');
+    if (countBadge) {
+        countBadge.className = 'auto-ping-badge is-pinging';
+        countBadge.innerHTML = '⚡ Pinging all desktops...';
+    }
+    if (btn) btn.disabled = true;
+
+    try {
+        const apiBase = (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL) || (typeof NMS_API_BASE !== 'undefined' ? NMS_API_BASE : '');
+        const res = await fetch(`${apiBase}/api/desktops/ping-all`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.success && Array.isArray(data.desktops)) {
+            const prevStatusMap = new Map((window.desktopData || []).map(d => [d.id || d.backendId, d.status]));
+            let transitionOccurred = false;
+
+            for (const d of data.desktops) {
+                const key = d.desktop_code || d.id;
+                const oldSt = prevStatusMap.get(key) || prevStatusMap.get(Number(d.id));
+                if (oldSt && oldSt !== 'Unknown' && oldSt !== d.status) {
+                    transitionOccurred = true;
+                    const icon = d.status === 'Online' ? '✅' : '🚨';
+                    toast(`${icon} Desktop ${d.desktop_code} (${d.department || 'Workstation'}) is now ${d.status}`);
+                }
+            }
+
+            if (transitionOccurred) {
+                playSound(true);
+                if (typeof loadAlerts === 'function') loadAlerts();
+                if (typeof checkGlobalAlertsWithSound === 'function') checkGlobalAlertsWithSound();
+            }
+
+            window.desktopData = data.desktops.map(desktop => ({
+                backendId: Number(desktop.id),
+                id: desktop.desktop_code || '',
+                department: desktop.department || '',
+                location: desktop.location || '',
+                ip: desktop.ip_address || '',
+                os: desktop.operating_system || '',
+                cpu: `${Number(desktop.cpu_usage ?? 0)}%`,
+                ram: `${Number(desktop.ram_usage ?? 0)}%`,
+                status: desktop.status || 'Unknown',
+                monitoring_enabled: desktop.monitoring_enabled,
+                monitoring_interval: desktop.monitoring_interval,
+                last_check: desktop.last_check,
+                last_latency_ms: desktop.last_latency_ms,
+                total_checks: desktop.total_checks,
+                successful_checks: desktop.successful_checks,
+                uptime_percent: desktop.uptime_percent
+            }));
+
+            // Filter desktop table according to location if specific location is selected
+            const loc = String(selectedDesktopMonitoringLocation || '').trim().toLowerCase();
+            let displayList = window.desktopData;
+            if (desktopMonitoringEnabled && loc && loc !== 'all' && loc !== 'all locations') {
+                displayList = window.desktopData.filter(d => String(d.location || '').trim().toLowerCase() === loc);
+            }
+
+            if (typeof renderDesktopRows === 'function') {
+                renderDesktopRows(displayList);
+            }
+            if (typeof updateDesktopStats === 'function') {
+                updateDesktopStats();
+            }
+
+            if (isManual) toast(`✓ All ${data.desktops.length} desktops pinged & refreshed`);
+        }
+    } catch (err) {
+        console.warn('Desktops auto-ping batch error:', err);
+    } finally {
+        isPingingDesktops = false;
+        if (btn) btn.disabled = false;
+    }
+}
+window.triggerAutoPingAllDesktops = triggerAutoPingAllDesktops;
+
+// MAIN TICKER (RUNS EVERY 1 SECOND)
 function startAutoMonitor() {
-    if (autoMonitorIntervalId) clearInterval(autoMonitorIntervalId);
-    let tick = 0;
-    
-    autoMonitorIntervalId = setInterval(() => {
+    if (autoPingEngineTimerId) clearInterval(autoPingEngineTimerId);
+    resetAutoPingTimers();
+
+    let globalTick = 0;
+    autoPingEngineTimerId = setInterval(() => {
         const token = localStorage.getItem('access_token');
         if (!token) return;
-        tick++;
 
-        // Read dynamically so it respects settings immediately without restart
-        let s = {};
-        try { s = JSON.parse(localStorage.getItem('nmsSettings') || '{}'); } catch(e){}
-        let netInterval = Math.max(3, parseInt(s.networkInterval) || 10);
-        let camInterval = Math.max(3, parseInt(s.cameraInterval) || 15);
+        globalTick++;
+        const cfg = getAutoPingIntervals();
 
-        const pageName = window.currentPage || document.querySelector('.page.active')?.id || 'dashboard';
-        
-        // Global stats & alerts refresh every 5s
-        if (tick % 5 === 0) {
+        // 1. Tick devices (using configured network interval)
+        if (cfg.networkEnabled) {
+            devicePingCountdown--;
+            if (devicePingCountdown <= 0) {
+                triggerAutoPingAllDevices(false);
+            }
+        }
+
+        // 2. Tick cameras (using configured camera interval)
+        if (cfg.cameraEnabled) {
+            cameraPingCountdown--;
+            if (cameraPingCountdown <= 0) {
+                triggerAutoPingAllCameras(false);
+            }
+        }
+
+        // 3. Desktop monitoring: Controlled ONLY via "Monitor Location" modal
+        // If desktop monitoring is ON, background ping runs every 10s quietly for monitored desktops
+        if (desktopMonitoringEnabled && globalTick % 10 === 0) {
+            triggerAutoPingAllDesktops(false);
+        }
+
+        // 4. Update banner visual labels & countdown numbers for devices and cameras
+        updateAutoPingBannerUI();
+
+        // 5. Global dashboard stats and automatic alert monitoring with sound chime (runs every 4s)
+        if (globalTick % 4 === 0) {
             if (typeof loadDashboardStats === 'function') loadDashboardStats();
-            if (pageName === 'alerts' && typeof loadAlerts === 'function') loadAlerts();
-        }
-        
-        // Network Devices & Desktops based on networkMonitoring and networkInterval
-        let netEnabled = s.networkMonitoring !== false;
-        if (netEnabled && tick % netInterval === 0) {
-            if (typeof loadDevicesFromBackend === 'function') loadDevicesFromBackend();
-            if (typeof refreshDesktopData === 'function') refreshDesktopData();
-        }
-        
-        // Cameras based on cameraMonitoring and cameraInterval
-        let camEnabled = s.cameraMonitoring !== false;
-        if (camEnabled && tick % camInterval === 0) {
-            if (typeof loadCamerasFromBackend === 'function') loadCamerasFromBackend();
+            if (typeof checkGlobalAlertsWithSound === 'function') checkGlobalAlertsWithSound();
         }
     }, 1000);
 }
 window.startAutoMonitor = startAutoMonitor;
 
-document.addEventListener('DOMContentLoaded', () => {
-    setTimeout(startAutoMonitor, 2000);
-});
-// ---------------------------
+let _seenAlertIds = null;
 
-// --- BACKGROUND STATUS SYNC TASKS ---
-let syncIntervalId = null;
+async function checkGlobalAlertsWithSound() {
+    const token = localStorage.getItem('access_token');
+    if (!token) return;
 
-function startBackgroundPinging() {
-    if (syncIntervalId) clearInterval(syncIntervalId);
-
-    // Smooth status sync every 30 seconds without flooding the cloud server
-    syncIntervalId = setInterval(async () => {
-        if (localStorage.getItem('adminLoggedIn') !== 'true') return;
-        const page = window.currentPage || document.querySelector('.page.active')?.id || 'dashboard';
+    try {
+        let enableAlerts = true;
         try {
-            if (page === 'dashboard' && typeof loadDashboardStats === 'function') {
-                await loadDashboardStats();
-            } else if (page === 'devices' && typeof loadDevicesFromBackend === 'function') {
-                await loadDevicesFromBackend();
-            } else if (page === 'cameras' && typeof loadCamerasFromBackend === 'function') {
-                await loadCamerasFromBackend();
-            } else if (page === 'desktops' && typeof refreshDesktopData === 'function') {
-                await refreshDesktopData();
-            }
-        } catch (e) {
-            console.warn('Background sync warning:', e);
+            const s = JSON.parse(localStorage.getItem('nmsSettings') || '{}');
+            if (s.alert === false) enableAlerts = false;
+        } catch(e){}
+
+        if (!enableAlerts) return;
+
+        const apiBase = (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL) || (typeof NMS_API_BASE !== 'undefined' ? NMS_API_BASE : '');
+        const res = await fetch(`${apiBase}/api/alerts?_t=${Date.now()}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!res.ok) return;
+
+        const data = await res.json().catch(() => ({}));
+        if (!data.success || !Array.isArray(data.alerts)) return;
+
+        const currentAlerts = data.alerts;
+        const activeAlerts = currentAlerts.filter(a => a.status === 'New');
+        const activeCount = activeAlerts.length;
+
+        // Synchronize sidebar, header, and dashboard badge counters with active New alerts
+        const sbAlerts = document.getElementById('sidebarAlertsCount');
+        const hrAlerts = document.getElementById('headerAlertsCount');
+        const dashAlerts = document.getElementById('dashAlerts');
+        if (sbAlerts) sbAlerts.textContent = activeCount;
+        if (hrAlerts) hrAlerts.textContent = activeCount;
+        if (dashAlerts) dashAlerts.textContent = activeCount;
+
+        const currentIds = new Set(currentAlerts.map(a => Number(a.id)));
+
+        // Initial check on load: capture existing IDs without chime
+        if (_seenAlertIds === null) {
+            _seenAlertIds = currentIds;
+            return;
         }
-    }, 30000);
+
+        // Check for new unacknowledged alerts
+        let hasNew = false;
+        let newest = null;
+        for (const a of currentAlerts) {
+            const aid = Number(a.id);
+            if (!_seenAlertIds.has(aid)) {
+                hasNew = true;
+                _seenAlertIds.add(aid);
+                newest = a;
+            }
+        }
+
+        if (hasNew && newest) {
+            console.log("🚨 New alert detected:", newest);
+            playSound(true);
+            if (typeof toast === 'function') {
+                const icon = newest.severity === 'Critical' ? '🚨' : (newest.severity === 'Warning' ? '⚠️' : (newest.severity === 'Info' ? '✅' : 'ℹ️'));
+                toast(`${icon} ${newest.message}`);
+            }
+
+            // Always update alerts page if open
+            if (typeof loadAlerts === 'function') {
+                loadAlerts();
+            }
+            if (typeof loadDashboardStats === 'function') {
+                loadDashboardStats();
+            }
+        }
+    } catch (err) {
+        console.warn("Global alert checking error:", err);
+    }
 }
+window.checkGlobalAlertsWithSound = checkGlobalAlertsWithSound;
 
 document.addEventListener('DOMContentLoaded', () => {
-    setTimeout(startBackgroundPinging, 5000);
+    setTimeout(() => {
+        startAutoMonitor();
+    }, 1500);
 });
+
+// Backward compatibility alias
+function startBackgroundPinging() {
+    // startAutoMonitor already performs live tick & background batch pings
+}
+window.startBackgroundPinging = startBackgroundPinging;
 // -----------------------------------------
 
 /* =========================================================
@@ -7572,49 +8174,8 @@ function filterAdminsTable() {
 }
 
 function renderAdminAuditLogs(events) {
-    const listEl = document.getElementById('adminRecentActivityList');
-    if (!listEl) return;
-
-    if (!Array.isArray(events) || events.length === 0) {
-        listEl.innerHTML = '<div style="color:#64748b; padding:10px;">No recent security events recorded.</div>';
-        return;
-    }
-
-    listEl.innerHTML = events.map(evt => {
-        const title = evt.message || evt.action || 'System health verification';
-        const source = evt.source_name || evt.admin || (evt.source_type ? `${evt.source_type} Service` : 'System Service');
-        const severity = String(evt.severity || 'info').toLowerCase();
-        const time = evt.created_at || evt.timestamp || 'Recent';
-
-        let typeClass = 'info';
-        let icon = 'ℹ';
-        if (severity === 'critical' || severity === 'danger') {
-            typeClass = 'critical';
-            icon = '!';
-        } else if (severity === 'warning') {
-            typeClass = 'warning';
-            icon = '⚠';
-        } else if (severity === 'good' || severity === 'success' || severity === 'low') {
-            typeClass = 'good';
-            icon = '✓';
-        } else if (evt.type === 'admin_management') {
-            typeClass = 'warning';
-            icon = '🛡';
-        }
-
-        return `
-            <div class="alert ${typeClass}" style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
-                <div style="display:flex; align-items:center; gap:10px;">
-                    <i>${icon}</i>
-                    <div>
-                        <b style="color:#f8fafc; font-size:13px;">${escapeAdminHtml(title)}</b>
-                        <small style="color:#94a3b8; display:block; font-size:11px;">Source: ${escapeAdminHtml(source)} · Status: ${escapeAdminHtml(evt.severity || evt.status || 'Logged')}</small>
-                    </div>
-                </div>
-                <label style="font-size:11px; color:#64748b;">${escapeAdminHtml(time)}</label>
-            </div>
-        `;
-    }).join('');
+    // Activity section removed from admin panel per user request
+    return;
 }
 
 function openAddAdminModal() {
@@ -7811,4 +8372,140 @@ window.toggleAdminStatus = toggleAdminStatus;
 window.deleteAdmin = deleteAdmin;
 window.filterAdminsTable = filterAdminsTable;
 
+
+
+
+/* =========================================================
+   STATUS TOGGLE & SIMULATION ACTIONS (DEVICES, CCTV, DESKTOPS)
+   ========================================================= */
+
+async function toggleDeviceStatus(deviceId) {
+    const token = localStorage.getItem('access_token');
+    if (!token) return (typeof toast === 'function' ? toast('Login required') : alert('Login required'));
+    if (typeof toast === 'function') toast('Switching device status...');
+    const apiBase = (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL !== undefined && window.APP_CONFIG.API_BASE_URL !== null)
+                    ? window.APP_CONFIG.API_BASE_URL : (typeof NMS_API_BASE !== 'undefined' ? NMS_API_BASE : '');
+    try {
+        const res = await fetch(`${apiBase}/api/devices/${deviceId}/toggle-status`, {
+            method: 'PUT',
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.detail || data.message || 'Toggle failed');
+        
+        const idx = (window.backendDevices || []).findIndex(d => Number(d.id) === Number(deviceId));
+        if (idx >= 0) {
+            window.backendDevices[idx].status = data.status;
+            if (typeof renderBackendDevices === 'function') renderBackendDevices(window.backendDevices);
+        }
+        playSound(true);
+        const icon = data.status === 'Online' ? '✅' : '🚨';
+        if (typeof toast === 'function') toast(`${icon} ${data.message || 'Device ' + data.device_code + ' is now ' + data.status}`);
+        if (typeof loadAlerts === 'function') loadAlerts();
+        if (typeof checkGlobalAlertsWithSound === 'function') checkGlobalAlertsWithSound();
+        if (typeof loadDashboardStats === 'function') loadDashboardStats();
+        return data;
+    } catch (err) {
+        if (typeof toast === 'function') toast('Toggle error: ' + err.message);
+    }
+}
+window.toggleDeviceStatus = toggleDeviceStatus;
+
+async function toggleCameraStatus(cameraId) {
+    const token = localStorage.getItem('access_token');
+    if (!token) return (typeof toast === 'function' ? toast('Login required') : alert('Login required'));
+    if (typeof toast === 'function') toast('Switching CCTV status...');
+    const apiBase = (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL !== undefined && window.APP_CONFIG.API_BASE_URL !== null)
+                    ? window.APP_CONFIG.API_BASE_URL : (typeof NMS_API_BASE !== 'undefined' ? NMS_API_BASE : '');
+    try {
+        const res = await fetch(`${apiBase}/api/cameras/${cameraId}/toggle-status`, {
+            method: 'PUT',
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.detail || data.message || 'Toggle failed');
+        
+        const idx = (window.backendCameras || []).findIndex(c => Number(c.id) === Number(cameraId));
+        if (idx >= 0) {
+            window.backendCameras[idx].status = data.status;
+            if (typeof renderBackendCameras === 'function') renderBackendCameras(window.backendCameras);
+        }
+        playSound(true);
+        const icon = data.status === 'Online' ? '✅' : '🚨';
+        if (typeof toast === 'function') toast(`${icon} ${data.message || 'CCTV ' + data.camera_code + ' is now ' + data.status}`);
+        if (typeof loadAlerts === 'function') loadAlerts();
+        if (typeof checkGlobalAlertsWithSound === 'function') checkGlobalAlertsWithSound();
+        if (typeof loadDashboardStats === 'function') loadDashboardStats();
+        return data;
+    } catch (err) {
+        if (typeof toast === 'function') toast('Toggle error: ' + err.message);
+    }
+}
+window.toggleCameraStatus = toggleCameraStatus;
+
+async function toggleDesktopStatus(desktopId) {
+    const token = localStorage.getItem('access_token');
+    if (!token) return (typeof toast === 'function' ? toast('Login required') : alert('Login required'));
+    if (typeof toast === 'function') toast('Switching desktop status...');
+    const apiBase = (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL !== undefined && window.APP_CONFIG.API_BASE_URL !== null)
+                    ? window.APP_CONFIG.API_BASE_URL : (typeof NMS_API_BASE !== 'undefined' ? NMS_API_BASE : '');
+    try {
+        const res = await fetch(`${apiBase}/api/desktops/${desktopId}/toggle-status`, {
+            method: 'PUT',
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.detail || data.message || 'Toggle failed');
+        
+        const idx = (window.desktopData || []).findIndex(d => Number(d.backendId || d.id) === Number(desktopId));
+        if (idx >= 0) {
+            window.desktopData[idx].status = data.status;
+            if (typeof renderDesktopRows === 'function') renderDesktopRows(window.desktopData);
+        }
+        playSound(true);
+        const icon = data.status === 'Online' ? '✅' : '🚨';
+        if (typeof toast === 'function') toast(`${icon} ${data.message || 'Desktop ' + data.desktop_code + ' is now ' + data.status}`);
+        if (typeof loadAlerts === 'function') loadAlerts();
+        if (typeof checkGlobalAlertsWithSound === 'function') checkGlobalAlertsWithSound();
+        if (typeof loadDashboardStats === 'function') loadDashboardStats();
+        return data;
+    } catch (err) {
+        if (typeof toast === 'function') toast('Toggle error: ' + err.message);
+    }
+}
+window.toggleDesktopStatus = toggleDesktopStatus;
+
+async function simulateQuickAlert(assetType = null) {
+    const token = localStorage.getItem('access_token');
+    if (!token) return (typeof toast === 'function' ? toast('Login required') : alert('Login required'));
+    if (typeof toast === 'function') toast('Simulating status alert...');
+    const apiBase = (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL !== undefined && window.APP_CONFIG.API_BASE_URL !== null)
+                    ? window.APP_CONFIG.API_BASE_URL : (typeof NMS_API_BASE !== 'undefined' ? NMS_API_BASE : '');
+    try {
+        const res = await fetch(`${apiBase}/api/alerts/simulate`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ asset_type: assetType })
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.detail || data.message || 'Simulation failed');
+        playSound(true);
+        const icon = data.new_status === 'Online' ? '✅' : '🚨';
+        if (typeof toast === 'function') toast(`${icon} [ALERT] ${data.message}`);
+        
+        if (typeof loadAlerts === 'function') loadAlerts();
+        if (typeof checkGlobalAlertsWithSound === 'function') checkGlobalAlertsWithSound();
+        if (typeof loadDashboardStats === 'function') loadDashboardStats();
+        if (data.asset_type === 'Device' && typeof refreshDevicesFromBackend === 'function') refreshDevicesFromBackend();
+        if (data.asset_type === 'Camera' && typeof loadCamerasFromBackend === 'function') loadCamerasFromBackend();
+        if (data.asset_type === 'Desktop' && typeof loadDesktopsFromBackend === 'function') loadDesktopsFromBackend();
+        return data;
+    } catch (err) {
+        if (typeof toast === 'function') toast('Simulation error: ' + err.message);
+    }
+}
+window.simulateQuickAlert = simulateQuickAlert;
 

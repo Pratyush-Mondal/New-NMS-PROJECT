@@ -622,6 +622,17 @@ function renderBackendDevices(
 
                             </button>
 
+                            <button
+                                type="button"
+                                class="table-action"
+                                style="background:#0284c7;color:#fff;font-weight:600;padding:4px 8px;border-radius:4px;"
+                                title="Toggle Online / Offline Status"
+                                onclick="toggleDeviceStatus(${device.id})">
+
+                                TOGGLE
+
+                            </button>
+
 
                             <button
                                 type="button"
@@ -1733,7 +1744,27 @@ function applyLanguage(language) {
 // ADVANCED NOTIFICATION CHIME & AUDIO ENGINE
 // ------------------------------------------
 
+const NMS_AUDIBLE_CHIME_B64 = "data:audio/wav;base64,UklGRuYmAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YcImAAAAAOQkp0B2TG9FVC0aCnHknsU1tTq3KMsQ7NMRJjPWR9BKXztYHSP469RbvHm0Mr/Z2dr9VSJQPupKEEU4LgkM8eYRyAG37reXyl/qbQ+iMNNFzEmaO8IeZPp014u+yLVNv7rYyfvTH/w7VkmgRAcv4w1i6X7K0biwuBvKxegZDSguzkO8SMI7FyCS/PHZu8Aht3m/sdfL+V8drDm8RyBEwS+pD8Lr5Mylun+5s8k/59YKtyvJQaFH1ztWIaz+YtzowoG4t7+81uH3+BpgNxxGkkNnMFkRE+5Dz3y8W7peyc7lpQhPKcI/fEbaO4EiswDH3hTF6rkFwNzVC/agGBo1d0T1Qvkw9hJU8JrRVr5DuxzJcuSGBvImvT1NRcw7lyOpAiDhPMdau2LAEdVI9FYW2TLNQktCdzF+FIXy6dMywDe87Mgr43cEnyS3OxVErTuZJIsEbONhydG8z8BY1JnyGxSeMB9Bk0HjMfIVpvQw1hDCNr3OyPfhewJXIrQ51EJ+O4clWwas5YLLTb5JwbPT/vDuEWkubj/QQD0yUxe29m7Y7sM+vsDI1+CPABogsjeMQUA7YiYZCN7nn83Pv9HBIdN179APPCy6PQBAhjKhGLb4otrMxVC/w8jK37f+6B2yNTxA8zoqJ8UJA+q3z1bBZ8Kg0v/twQ0VKgQ8Jj+9MtsZp/rO3KrHa8DVyNDe7vzBG7Uz5j6YOuAnXgsc7MnR4MIIwzHSm+zAC/YnTDpCPuMyAxuH/PDeh8mOwffI6N02+6YZvDGKPS86hCjmDCbu1tNuxLXD1NFK688J3yWTOFM9+jIZHFf+B+Fiy7nCJ8kT3ZD5lxfGLyk8ujkWKVwOJPDd1f/FbsSG0Qrq7AfQI9k2XDwBMxwdFgAV4zzN6sNlyU/c+veUFdQtxDo4OZgpwA8T8t7Xk8cxxUnR3egYBsohIDVcO/oyDx7FARjlFM8ixbHJnNt19p0T5ytaOao4CCoUEfXz19koyf7FHNHA51MEzB9nM1Q65DLvHmUDEefo0GDGCsr62gH1shH/Kew3EThpKlYSyvXK277K1Mb90LXmnQLXHa8xRTnAMr8f9gT+6LrSosduymnanfPUDxwofDZtN7oqiBOQ97bdVcyzx+3Qu+X2AOwb+S8vOI8yfyB2BuHqiNTqyN/K59lK8gMOPyYJNcA2/CqpFEn5md/tzZrI7NDR5F//ChpELhM3UTIuIecHuexS1jbKW8t12QbxPQxoJJQzCTYwK7oV9Pp14YTPicn30Pfj1f0yGJIs8TUHMs4hSQmF7hfYhcviyxLZ0++FCpgiHjJINVUruxaR/EnjG9F/yhDRLeNa/GQW4irKNLExXiKbCkbw2NnXzHLMvtiu7tkIziCmMIA0bCusFyD+FOWx0nvLNtFy4u76oBQ1KZ8zUDHfIt4L+/GU2yzODc142JrtOgcKHy4vrzN2K44Yov/W5kXUfsxn0cbhkPnmEownbzLkMFIjEg2l80rdg8+wzUDYlOyoBU4dti3XMnMrYBkVAZDo19WGzaTRKuFB+DYR5yU8MW4wtiM4DkP1+97c0FzOFdid6yIEmhs+LPgxZCskGnwCQOpn15PO7NGc4P/2kQ9GJAUw7y8MJE8P1vam4DbSEM/317XqqQLtGccqEzFJK9oa1QPo6/XYpc8/0hvgzPX2DakizC5mL1YkWBBd+EvikdPMz+bX3Ok9AUgYUSkoMCMrgRshBYbtgNq70JzSqd+m9GYMESGRLdUukiRSEdj56ePs1I/Q4dcQ6d7/qxbcJzgv8SobHF8GG+8H3NXRA9NE347z4Qp+H1MsOy7BJD8SR/uA5UfWWdHo11Loi/4WFWkmQi61KqcckAem8Ird8dJz0+zehPJmCfAdFCuZLeQkHhOr/BHnotcp0vnXoudE/YoT+SRILW8qJR20CCfyCt8R1OzToN6H8fYHaBzVKfEs/CTvEwP+muj82P7SFtj/5gr8BhKLI0osHyqXHcwJn/OG4DPVbdRh3pjwkQbmGpQoQSwIJbQUT/8c6lXa2dM92Gnm3PqKECAiSCvGKf0d1goN9f3hV9b21C7ete83BWoZVCeLKwglaxWOAJfrrNu51G7Y4OW6+RgPtyBDKmQpVh7UC3H2b+N814bVBt7f7ugD9BcTJs4q/yQWFsMBCu0C3Z3Vqdhj5aX4rg1THzsp+iijHsUMy/fc5KPYHtbp3RXuowKFFtMkDSrrJLQW7QJ17lXehdbt2PLkm/dODPIdMSiIKOUeqw0b+UTmytm81tfdWO1qARwVlCNGKc0kRxcLBNjvp99x1zrZjeSe9vYKlRwlJw4oGx+EDmH6p+fy2mDX0N2n7DsAuhNWInoopSTNFx4FNPH14GDYj9k05Kz1qAk8GxcmjSdHH1EPnfsE6RrcC9jT3QLsGP9fEhohqid1JEgYJQaH8kDiUtns2eXjxvRiCOgZByUFJ2gfEhDP/FvqQd262N/daOv+/QsR3x/WJjwktxghB9LziONG2lHaouPr8yYHmRj3I3cmfx/IEPf9rOtp3m/Z9d3a6u/8vg+nHv8l+iMbGRMIFPXN5D3bvdpp4xvz8wVOF+Yi4yWMH3MRFf/37I/fKNoT3lfq6/t4DnAdJCWwI3UZ+QhP9g3mNdwv2zrjVvLJBAkW1SFKJY8fExIoADvutODl2jve3+nx+jsNPRxGJF8jxBnUCYH3Sucv3anbFeOd8akDyBTEIKskih+nEjMBeu/X4afbat5x6QH6BAwMG2YjByMJGqUKqviD6CneKNz64u7wkQKNE7MfByR7HzITMwKx8Pnia9yi3g7pHPnVCt4ZhCKnIkMabAvL+bfpJd+t3OjiSvCDAVgSox5fI2QfsRMqA+LxGeQ03eHetehB+K4JtBigIUIidRooDOP65uoh4Djd3+Kw738AKRGUHbIiRR8nFBcEDPM35f7dKN9m6HD3xyFJWP9sulh5JHzlZrQ+o262neOkFnE620HBLFYHFuQ403bbRPe6F7srFSgADVDmVcaIvc3Ssf+NMrpV1VgdOK3+Z8I+m12ZX75r/Ko712P8ZU1Cywfizb+qdKqDypv7jyh+PyM5Uxu19U3aTNWx5yoHIyOmLIcdkvsv1pG/V8Rj5cQWTUQCWs5MuB8749+uu5ezpzvZbBmQTwxnm1dnKNDsTLzcqPm39+BIEbk0+T3hKzgJVecI1oLcS/acFfspECgqD+7puMnYvubQyvpCLH5Q8FazOicFl8ololmcNbzN9fUyNFwiYn1DXg2c1bixQK4Yyp738CKSOqo20BtW+G7dSte0538FByGbK40ej/7q2TTCR8QQ4g0RQT4XVtxMICSo6rK2Cp1tqP/UtREpR/5gAFakK33zz8N2rti52N5yDFgvKjrVKs4KTOqu2IrdZvWREzoo7ycvEXLtKs1nwGHPQ/YuJi9LrFS1PAoLZdIJqbefs7rj78QqtFQBXhZEQhLK3He4MLIbyir0wR3dNSc0ERys+lXgM9nC5+oD9R6CKm4fZgGb3frEh8Qj36cLTTj3UW9M7yeS8Uy+g6KqqXPRoAodP+Ja91M8Loj56coBtP27NN0aCE0qczamKSEMAe0t247ekvSYEXgmtCcLE9zwptAuwjjOHfJWINhFElIrPloQztnfr2ejzLmm6hcjYU2mWSdEgBZw4/a+ObZ9yjPxABlhMZ8xIBy//AjjBtvX52kC7BxbKSwgGQQ/4d/HE8WY3JcGejKtTZJLKiv596TFGKhcq47OKQRwN8dUkFE8MPj+m9F0uV2+/9s6BJgl2DJdKDcNee+H3Yvfz/OvD7MkXie/FCb0JdQpxGjNWO6/GoJALk8ePxoVzuCbtlyncrkR5u8bREYgVb1DIhqO6TDFUbozy7HupxQgLRgvAxyV/onlxNz05/oA7BokKMUgowbR5N3K5cVt2t4BzixCSVBK2S3d/bTMva10rUXMT/4mMLZO2k6wMdID4tfIvuzALtvKADchXS/+JhkOufG+34TgGvPWDe0i7SZJFk/3pddSxu3M8+puFTU7CkyXP04ZYec0vYirmbka4kwVZD98UOdCMh0p7yDLbb4yzJrssxAbKZgswBszANvnb94X6J7/9RjfJjkhBAlO6O/N98ag2H39TyfBRLNIAzA/A3XTZ7Pmr43KCvlEKbpI4UulMh8Ivt32w5/Dt9rD/SgdAyyQJcwOxfPU4Xbhc/INDCQhYSapF1X6H9ujyMLM7edlEPk1sUigP/ochu2jw9+vNbq53i4PyDjGS7FBuR9F9MXQhcJuzebqHQ1RJSIqXxufAQPqB+BA6FL+BReLJYkhOwuz6w/RRcgs13X5BCIzQMVGsDEiCOTZC7mlslvJVfTMItxCsUgmM+cLMeP4yG7GkNoe+2cZzygZJFYPovXL42Ti2vFSClkfuyXeGDX9kd4Wy+LMQ+WnC9YwLEVCPyUgPfPfyVW0Obvn25EJdTIHRydAwyHm+BvWksbfzorp4QnDIbon5BrfAgTsjeFu6Bb9HhUqJLUhRg377jjUyckO1sT17xyfO5BE5jKJDP3foL6ktaXILfC9HCM9V0U+My8PPOjKzU7Jr9rT+PMVwCWbIrwPVfel5UzjTvGlCI0d+yTpGe3/9eGnzUjN9OI2B9ErhUGHPtQihfjjz+C4mbyZ2XMEbixKQlc+WCMQ/SHbjcp60H/o+gZvHmMlVBr3A+DtAuOi6Or7PxO7Ir4hJA8l8mbXfctC1WvyFhgPNx1CrzN2ELzlHsTZuF/IiewaF5U33UH6MgES4exp0jnMC9vc9sgS1yIcIQQQ4Phl5zDkzvAHB8AbJCTKGnsCSOVP0O/N/OAUA/AmxD12PQ0lX/2p1XW9Sr7I19L/uCaXPUk8gyTJANjfcc450rznYgRUGx8jsxnrBJzvaeTb6M76ahFCIaUh1hAu9ZPaXM3D1GnvexOJMnY/EzTuEyDrfck5vIDIY+nhEToyTT5iMmQUIvHQ1ijPndsx9eIPFiCeHzAQSfoM6RDlW/B3BfMZNSOCG98EhugJ09HOWd9B/zki8jkbPNgmzAEs2wzCQsBp1qj7VCH1OAo6TSUXBD/kOdIS1DvnFQJwGPAgBRm/BTjxwuUb6cH5nQ+9H2ohWxIT+LvdX8+M1LzsIQ8TLqM8GTT2Fijwt865v/3IteYQDRUtsDqCMV8WBPX/2hXSXNzN8z4NfB0kHkUQkfue6uzl9O/2AycYMSIRHBcHrevR1erPBd69+7AdFzZ8OjkozwVq4JzGdsJ21fD3RBxsNKE3vyUAB1fo4dUA1vPmDADCFdceTRh4BrnyDedf6cT42w0wHhAhsxPT+tvggtGa1GHqCgu1Ka05yTORGdT0xtNQw8zJeOSnCCkoDjdjMPsXifj13vnUQd2o8tgKCBuxHEcQvfwa7Mbmmu+FAl4WGSF4HCQJuO6h2DPR/9yH+FgZOjKiODkpawlg5R7L3cTj1Kf0iBcBMBk14iWKCSHsZtn719/mRP5HE9QcjxcXByH0Tuiq6df3JAybHJcg3xRr/e3jwNPm1FfoOAdyJZs2LDPGGyP5pdj2xuPKo+KiBHsjbjMOLz8Ztfuv4tHXRt698a0IuhhFGzgQz/2D7Z3nTe8iAZgU7h+4HAQLpvF026fSQtye9TQVYC6XNt4pogwL6ovPbceq1MfxIBO5K3kyviW6C5/vxdz/2ffmtvz9EOkazBagB3H1g+n86fr2eAoAGwEg3xXc//DmEtZs1ZrmqgNQIXYzSjKZHRf9UN2jyjvMMeH+AAwf1i+LLTMajf4u5pnaZN8G8bkGkRbjGRwQyf7c7nPoDO/R/9cSsh7THLcMdPRH3kLUydsC80gRkipgNDAqeA9r7t7THcrB1EvvDA+YJ8kvXCWXDdPy/d8H3DbnXvviDhYZBhYVCK32r+pT6i322AhgGVAftRYiAt7pddgn1iflYgBTHUQwKTERH7EAxOFQzsnNGeC6/d4aTSziK90aFQFz6U3dmOB+8PcEjBSMGPQPrv8k8Ejp2O6Q/hsRaB3LHD4OIPcW4f3VkNuw8JQN0iYHMjQq8RF/8hHY5swh1S3tSwuiIw8twiQmD8H1C+MN3pbnOPrzDFoXQBV6CNT30+uy6nH1Rge9F4ceYRc/BLbs5NoR1/vjX/1+GQwt0i8zIPQD/+X10YbPVd/P+vEW1ygbKkYbUQN+7Ovf2uEf8GYDqRJAF8IPfwBd8RzqsO5f/WcPEByhHJkPqPnb49TXktun7hsKKCORL/IpEhRG9iDcwM/B1Wbr2gfZH1Iq+iNuEGr48OUP4BLoPvkuC7YVexTPCOr47uwX68X0wwUZFqYd5RcxBnXvWd0n2BPjoPrVFdMpSy4EIeIG/emO1WvR3t47+EYTeSU7KHMbRgVQ73DiKOPl7wAC5xAAFogPPwGJ8u/qlu4//LsNrhpWHMkQDPyU5sPZzNvj7N4Glx8GLXIp3hXD+QjgpdKZ1vPptwRAHJcnCCN0EdL6qugJ4qbobfiQCSgUtxMWCfD5A+6D6yr0TgR1FLAcQxj5Bxjy0t9i2WniJPhaEp8mmyyMIX4Jv+0W2W/TrN749d0PNiJKJmsb+gbq8drkfeTL78IARQ/MFEgP8AGp88Prie4y+xkMQhnuG84RSv4/6cTbONxi69wDIhxsKrgoWxf0/MTjj9Wj18vo4AHYGOIk9SE+Evv8Ouv5403pwPcWCLAS9RJSCef6EO/266Dz6QLUEqgbexiXCZ70SeK/2vvh6vUOD3QjySrPIcsLQ/GH3IzVuN4D9LUMEh9NJDQbbwhP9Cnn1uXO76v/wQ2lEwIPkgK99Jbsie42+oIK0BdqG6oSYADW69Ld0twi6hUBzhjIJ8wnjRjd/1Tnd9jY2OvnVP+iFTkixCDREur+n+3b5QTqNfe/Bk4RNxKDCc/7F/Bx7CfzlAE2EY8akBgKCwT3vOQ43MTh8PPzC1kg2yjTIcwNifTd37vX/d5X8swJDhxIItQaqgmA9lvpL+fo77T+WAyKErkOJwPG9Wrtle5N+fgIWRbMGl8TUAJZ7uvfld0e6Yv+nRUgJbQmeRl9ArTqWNsx2kvnDP2fEp8ffR8zE6AA3O+u58fqx/aHBQEQfRGrCav8GfHy7L/yUQCeD2cZhBhUDEn5JufJ3cHhNPIKCU8d1yafIYYPkfcW4/jZdN/w8CIHLRlBIFAasQqA+G/rhugY8N39Cwt7EWwOrwPF9j7uru53+HoH3hQXGuwTGATF8Anifd5U6Dv8kRJ4InYlJRrZBOTtL96p2+fmCPvODxcdIx5oEyMC7/Fx6ZTrdPZsBMcOxxDJCXv9FfJ57WjyIf8NDjQYWBh2DW37helu3+3htPBUBlwawiQ4IfoQXPov5jzcF+DI77QEcRY8Hq4ZhwtQ+mbt2elZ8CL91gl4EBwOLQS79xPv1O6z9woGYxNNGVUUuQUX8ynkht/A5yP6rA/WHxYklBrzBuLw9+A43bnmQ/kwDaMavBx3E3YD3PMi62fsN/ZtA6ANFRDhCT/+DPMI7iHyAf6EDPYWDxhwDm391usi4UTibe/RA4EXoSKjIC8S6vwl6YPe4ODc7oEC2hM7HPEYMQz0+0DvJuup8ID8uAiBD8oNoASn+OjvBu8D96oE6BFvGJsUNAdP9Ujmq+Bf50T47ww9HZwizBrNCK/zrOPb3rvmuffDCkcYTBtiE5sEovXA7D3tD/aGAooMaA/wCfj+/fOc7uvx9fwFC7AVrBdDD0v/Fu7i4sLiXO6AAcIUeSDlHycTPv/368jgy+Em7oYAaRFDGh8Yswxt/fzwa+wG8fb7sQeVDnYNCQWK+b3wRO9l9loDcBCBF8AUhwhq92Lo6OEt55v2XAqwGgwh0hpqCkn2TOaL4OnmaPaHCAMW1hkuE5cFQ/dM7hbu+fW2AYULvw76Caf/6fQ378Xx+/uRCWUULxfyDwQBRPCq5GPjf+1i/yESTx4EH+cTWAGi7gfj0eKj7cH+Hw9WGDwXEA29/pvyp+1s8YD7vQa0DSANaAVk+pLxje/a9RoC+w6EFsUUtQlo+XTqOuMm5yb19Ac0GGofqhrNC7L41ehG4j3nTPV6BtoTXhjgEmsGwfjD7+/u8/X7AJAKGw79CUsA0fXX76/xFfspCBUTnBZ9EJsCXPJ35iPk0+x1/Z8PJhwEHnMUOwMn8T7l7uNN7S/9+wx2FksWTA3p/x702O7a8Rz73AXdDMoMvwU2+2by4O9i9ewAjQ17Fa0UvgpI+3zsm+RH5+PztgXKFbsdWRr6DOv6Q+sG5LPnYPScBMwR5xZ7EhwHHvon8cfv+vVTAKoJew37CeYAsvZ88KjxQvrOBsQR9RXnEA8EXvRF6P/kVOy3+z4NAhrrHM8U6QSE82nnHuUg7c37/QqmFFAVaw3wAIb1/+9O8sr6DQUPDHIMDQb/+zrzP/D89NH/JgxoFHsUpAsJ/XfuCuaN59HyowN1EwMc5BnzDfP8lu3H5UfoovPqAtkPcxUCEq0HWvt38pzwDPa+/9II3wzzCXgBj/cl8bDxgvmBBXMQPBUxEV8FSfYR6vPlAOwp+v8K5Re8G/8UZAa69YTpXOYZ7Zj6JAnmEk0UcA3XAdP2GvHH8ob6TgRLCxkMUwbA/Az0pvCo9Mf+yApNEy8UZwyq/mTwg+fz5+zxuQE3EUYaThm8Dsz+y++H5/ToDvNiAQMOBBR5ESAIefyz823xKfY3/wYIRwzmCQACZfjS8cfx1vhEBCQPcxRcEY0GGvjY6/rm0+vI+OMI1BV8GgcVrwfI94/rpecz7Y/5cAc4EUYTXg2hAgf4KfJC81D6nQOPCsALkQZ5/d30F/Fl9M/9dAktEswTCA0rAEDyAel36DLx+/8TD4cYnRhYD3cA4/FD6bfpoPIDAEoMnhLjEHgIe/3c9DnyTfa//kcHtAvUCYACNvmD8uvxPfgWA9gNnRNrEZoH0fmZ7RPoyuuS9+oG0RMtGesUywiu+Yft9uhr7a343wWeDzwSOA1OAyP5K/PA8yX6+gLcCWULxwYp/qz1kPE09Ov8KggIEVUTiw2OAQn0g+oU6aDwZf4IDcoW0xfLD/cB3PP36ovqVfLL/q0KQRFCELkIY/7z9QDzefZU/pMGIwu+CfcCAfo28xvyt/f5AZEMuxJgEYYIbvtQ7znp4+uG9hUF3RHVF64UvQlu+2vvS+q97fH3cQQXDjMRAg3iAyf6IfQ+9AT6ZAIwCQoL9gbR/nn2EfIT9Bn87QbhD8wS7w3SAr/1BuzJ6TXw9vwZCxEV9RYXEEwDtfWi7G3rKfK3/SwJ7w+ZD+QIMv/39sDzqvb1/eoFlwqiCWQDxfrr81jyQ/fsAFALzxE9EVIJ8Pz88GnqGuyi9WID+g92FlQUhQoI/Tnxoesm7lf3JAOlDCsQvAxeBBb7C/W89O352QGMCK8KHgdw/0L3mfIC9Fr7vQW6DjISNg73A2D3h+2R6u3vrvtGCWATBRZBEHoEcPdC7lvsGvLG/McHqQ7qDvwI6f/p93r04Pah/UoFDQqDCckDg/ui9KDy4fby/xcK3BADEQEKVv6c8qLrbOzk9NMBKw4UFeATKAt+/vDy9eyh7t329wFICycPagzGBO/76PU59d35WgHuB1IKPgcGAAj4JvP/8636mwSUDYkRYw7+BOz4BO9p68XvjPqQB7cRCBVLEIIFDPnU71HtJfL1+30Gbw03DgIJiwDL+C71GfdW/bMEhwlfCSYEOvxZ9fPykfYI/+cI5A+1EJIKov8t9N/s1uxJ9GUAcQywE1cTpwvP/4/0R+4u74D26AAACigODgwZBbb8ufa09dX55ABXB/UJVweUAMr4ufML9BP6iANxDNUQdw7oBWH6e/BQ7Lvvjfn2BRoQARQ5EGUGiPpX8UzuRvJC+04FQwyCDfsIGgGc+dr1VvcV/SYEBAk2CXoE6vwQ9k/zUfYw/sIH6A5VEAcL0QCt9R/uVu3P8xv/zApOEroSBgz+ABf2ku/H7z329//MCDANqQtcBWn9fvcu9tP5dwDGBpcJaQcZAYj5UPQl9Iv5gwJTCxYQdA62Br/76vFB7c3vsPh6BIoO8hINECYH5/vL8kvve/Kq+jcEJgvMDOYIlgFe+oD2lPfb/KADhAgKCcUEkv3G9rTzIvZq/acG6g3kD2IL5gEd91/v6O118/D9PQnwEA0SRgwMAof31/Bs8BP2If+sBz4MPguOBQz+OPil9tb5EwA6BjkJdQeWAUH66vRL9BX5jgE6Ck4PXA5oBwb9TvM77vjv9fcaAwgN3RHKD8cHKP0u9EvwwfIt+joDFwoXDMYIAgIR+x731fep/CEDBgjaCAkFM/579yH0A/a1/JcF6wxkD6UL4gJ8+J7wiu448+T8xQeXD1MRawz7At74EvIa8f31ZP6hBlULzgqzBZ/+5vgZ9975t/+1BdoIegcKAvX6iPV99LD4qQAoCYAOMA4ACDX+qPQ77zjwWPfWAZYLxhBzD0sITf5/9UrxFvPH+VMCFglkC5wIXgK2+7X3Fvh9/KoCiwenCEQFzP4v+JX08vUR/JUE7gvZDtALwwPH+djxOu8V8/f7ZQZGDo4QeAzMAx36RPPN8fv1vv2pBXUKWwrLBSP/ivmK9+r5Yv80BXoIeQd2AqL7J/a59Fz41P8dCK0N8g1/CE3/9vU/8I3w1/avADQKrg8KD7MIVv+/9kfyd/N4+YMBJQizCmsIrQJO/EX4WPhY/DoCEwdvCHcFXf/f+A/17/V/+58D8wpCDuYLiwQA+w7z9e8K8yf7HAX/DMEPbgyBBEX7avSG8gv2MP3FBJ4J5AnYBZn/JPr49/r5FP+5BBsIcgfYAkr8x/YA9Rj4D/8cB9YMpA3mCE4ANfdF8fLwc/aj/+QImA6TDgEJQwDs9z/z4/M8+cgAQgcHCjMI7wLa/M74m/g4/M8BngY1CKIF5v+M+Y71+vX9+rcC+wmiDecLOwUl/Dz0ufAW83P66gPCC+4OTwwbBVb8hfVB8yn2tvzzA9AIbQnbBQEAs/pj+A76zP5CBLsHZQcyA+z8aPdQ9eP3Wf4kBv4LSA03CTgBZ/hM8mfxJ/ax/qYHhA0PDjgJGAEG+TL0V/QS+SEAbQZfCfUHJgNb/VH53vgd/GsBKwb3B8UFZgA2+hH2EfaM+t0BCQn7DNcL1AU2/WL1hPE289n5zwKQChcOIAydBVD9kvb981T2T/wyAw0I9gjWBV8AOvvK+CT6iv7QA1oHUgeEA4b9CPin9b33tP03BSUL4AxzCQwCiflQ8+nx8/XZ/XsGdgyBDVoJ1AEP+h/10vT4+I7/pwW8CLQHUwPR/c35IPkH/A0BugW2B+AF3gDb+pf2M/Yq+hABHQhNDLULVwY0/n/2U/Jo81n5zAFrCT4N4AsIBjT+k/e49Iv2+vuCAlMHfwjKBbIAt/sv+Tz6Tv5jA/oGOQfMAxn+p/gG9qT3Hv1VBE4KbAybCcoCnPpR9Hby1PUZ/WIFbQvrDGgJegIF+wT2UvXt+Av/7wQfCG8HdgM8/kP6Yvn2+7QATQVzB/UFTQF7+yH3X/bY+VMANwecC4ULxAYe/5H3JvOq8+/43gBUCGUMkwtdBgL/hvhy9cv2tfvjAaQGCQi3BfwALPyP+Vf6F/76ApoGHAcNBKX+RPlr9pn3mPx/A3gJ8AuxCXQDn/tO9QzzyfVw/FsEbApODGUJCgPp++H21vXv+Jn+RASIBycHkQOf/rP6pPnp+2EA4gQtBwIGtAEW/Kv3lfaU+aT/WgboCkcLHgf1/5j4+vP685z4BwBKB40LOgueBrz/a/kp9hP3f/tSAf8FlgefBTwBmvzt+XT65v2VAjsG+gZFBCr/3/nV9pr3Ify0AqYIawu1CQgEkvxE9qnz0PXe+2gDdAmsC1MJhQO7/LX3XPb8+Db+pgP3Bt4GpQP5/h375fnf+xMAeQTlBggGEwKr/Df41PZf+QP/hQUyCvwKZAe3AJP5zvRW9F34Rf9OBrcK2ArOBmIAQ/rc9mL3VvvQAGMFJQeCBXQBAP1H+pL6uf01AtwF0wZ1BKb/d/pE96f3ufv1AdgH4AqqCYoEdP0090z05/Vh+4cChAgHCzIJ7QN8/YD44/YT+eH9FQNsBpQGsgNK/4L7JvrZ+8r/FASbBggGaQI6/cP4G/c3+W/+uQR8CacKmAdoAYH6ofW99DD4l/5iBeUJbQrtBvcADPuL97b3OftcANIEtgZiBaQBX/2e+rP6kf3aAX0FpwadBBoAC/u29773XvtDAQ8HUQqRCfgERf4c+PL0Dfb4+rgBnwdhCgUJRAQt/kH5avcz+Zn9jwLoBUkGugOV/+H7ZfrX+4b/sQNQBgIGtwLD/U75aPcb+er99gPGCEkKvAcHAmL7cfYs9RX4/f2EBBgJ/An9BnkByPs0+A74J/v2/0oESwY+Bc4Bt/3y+tT6bf2CASAFeAa9BIcAm/sr+N/3EvueAEwGvQlsCVUFB//7+Jv1P/ah+vsAxAa6Cc4IigTN/vj58Pda+V39FQJrBf8FvAPY/zz8pPrX+0f/UQMDBvUF/AJF/tj5vPcM+XL9PgMTCOMJ0QeUAjf8Pfej9Qr4df20A1AIhgn/BusBd/zY+Gr4H/ua/8sD5AUYBfIBCv5E+/f6Tf0vAcMERQbWBOwAJ/yi+Aj40voEAJAFJwk6CaEFuP/R+UX2ffZc+k8A8wUUCY4IwQRe/6T6dPiH+Sz9pgH0BLUFugMUAJH84vrb+wz/9AK1BeMFOgPA/mD6FPgH+Qj9kAJiB3YJ1wcRA/38BPgf9g34//z0Ao8HDAn2Bk4CGP11+cf4IPtJ/1UDgAXwBBACVv6S+xv7Mv3gAGgEDwboBEgBrfwa+Tr4n/p5/9sEkAj/CN4FWQCd+u/2xfYo+rX/LgVwCEYI6wTg/0f79vi5+QX9QQGEBGwFtANLAOP8H/vh+9X+mwJmBcwFbwM1/+b6cfgN+ar87AG1BgUJ0Qd9A7b9xfig9h34mvxCAtUGkAjhBqICrP0L+iX5KPsD/+gCIAXHBCkCnf7d+0D7G/2VAA8E1gXzBJ0BL/2S+XL4ePr4/i4E+Qe6CAsG6wBe+5f3FPcC+in/dQTPB/gHBwVUAN/7dfnw+ef85QAbBCUFqwN9AC/9XPvq+6P+RAIXBbAFnQOi/2j70fgc+Vr8UwENBo4IvgfZA2L+gPkk9zj4RPyeASMGEgjEBukCNP6b+oT5N/vG/oMCxAScBD4C3/4m/Gb7B/1OALcDmwX4BOoBqv0K+rH4XfqE/okDYgduCCsGbgEV/D34a/fq+a7+";
+
 let _sharedAudioCtx = null;
+let _nmsAudioEl = null;
+
+function getNmsAudioElement() {
+    if (!_nmsAudioEl) {
+        _nmsAudioEl = document.getElementById('nmsChimePlayer');
+        if (!_nmsAudioEl) {
+            _nmsAudioEl = document.createElement('audio');
+            _nmsAudioEl.id = 'nmsChimePlayer';
+            _nmsAudioEl.style.display = 'none';
+            _nmsAudioEl.preload = 'auto';
+            document.body.appendChild(_nmsAudioEl);
+        }
+        if (!_nmsAudioEl.src || _nmsAudioEl.src === '' || _nmsAudioEl.src.length < 50) {
+            _nmsAudioEl.src = NMS_AUDIBLE_CHIME_B64;
+        }
+    }
+    return _nmsAudioEl;
+}
 
 function getSharedAudioContext() {
     try {
@@ -1752,11 +1783,17 @@ function getSharedAudioContext() {
     }
 }
 
-// Automatically unlock AudioContext on ANY user gesture
+// Automatically unlock AudioContext and HTML5 Audio on ANY user gesture
 ['click', 'keydown', 'mousedown', 'touchstart'].forEach(eventName => {
     document.addEventListener(eventName, function unlockAudio() {
         getSharedAudioContext();
-    }, { passive: true });
+        try {
+            const el = getNmsAudioElement();
+            if (el && (!el.src || el.src.length < 50)) {
+                el.src = NMS_AUDIBLE_CHIME_B64;
+            }
+        } catch (_) {}
+    }, { passive: true, once: false });
 });
 
 function isSoundNotificationEnabled() {
@@ -1778,54 +1815,56 @@ function playSound(forced = false) {
         return;
     }
 
+    let webaudioPlayed = false;
     try {
         const ctx = getSharedAudioContext();
-        if (ctx) {
-            const playDualTone = () => {
-                try {
-                    const now = ctx.currentTime;
-                    // Dual-tone chime: Tone 1 (Ding 880Hz) -> Tone 2 (Dong 1175Hz)
-                    const osc1 = ctx.createOscillator();
-                    const gain1 = ctx.createGain();
-                    osc1.type = 'sine';
-                    osc1.frequency.setValueAtTime(880, now);
-                    gain1.gain.setValueAtTime(0.40, now);
-                    gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.30);
-                    osc1.connect(gain1);
-                    gain1.connect(ctx.destination);
-                    osc1.start(now);
-                    osc1.stop(now + 0.30);
+        if (ctx && ctx.state !== 'suspended') {
+            const now = ctx.currentTime;
+            // Dual-tone chime: Tone 1 (Ding 880Hz) -> Tone 2 (Dong 1175Hz)
+            const osc1 = ctx.createOscillator();
+            const gain1 = ctx.createGain();
+            osc1.type = 'sine';
+            osc1.frequency.setValueAtTime(880, now);
+            gain1.gain.setValueAtTime(0.45, now);
+            gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+            osc1.connect(gain1);
+            gain1.connect(ctx.destination);
+            osc1.start(now);
+            osc1.stop(now + 0.35);
 
-                    const osc2 = ctx.createOscillator();
-                    const gain2 = ctx.createGain();
-                    osc2.type = 'sine';
-                    osc2.frequency.setValueAtTime(1174.66, now + 0.12);
-                    gain2.gain.setValueAtTime(0.40, now + 0.12);
-                    gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.48);
-                    osc2.connect(gain2);
-                    gain2.connect(ctx.destination);
-                    osc2.start(now + 0.12);
-                    osc2.stop(now + 0.48);
-                } catch (toneErr) {
-                    console.warn("Dual tone generation error:", toneErr);
-                }
-            };
-
-            if (ctx.state === 'suspended') {
-                ctx.resume().then(playDualTone).catch(playDualTone);
-            } else {
-                playDualTone();
-            }
-            return;
+            const osc2 = ctx.createOscillator();
+            const gain2 = ctx.createGain();
+            osc2.type = 'sine';
+            osc2.frequency.setValueAtTime(1174.66, now + 0.12);
+            gain2.gain.setValueAtTime(0.45, now + 0.12);
+            gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.50);
+            osc2.connect(gain2);
+            gain2.connect(ctx.destination);
+            osc2.start(now + 0.12);
+            osc2.stop(now + 0.50);
+            webaudioPlayed = true;
+        } else if (ctx && ctx.state === 'suspended') {
+            ctx.resume().catch(() => {});
         }
     } catch (err) {
         console.warn("WebAudio chime notice:", err);
     }
 
-    // Fallback: HTML5 Audio synthetic wav beep
+    // Audible Fallback & Guaranteed Playback via HTML5 Audio element
     try {
-        const fallbackAudio = new Audio("data:audio/wav;base64,UklGRl9vT19XQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YU9vT18AAAA=");
-        fallbackAudio.play().catch(() => {});
+        const audioEl = getNmsAudioElement();
+        if (audioEl) {
+            audioEl.currentTime = 0;
+            const playPromise = audioEl.play();
+            if (playPromise !== undefined) {
+                playPromise.catch(err => {
+                    try {
+                        const freshAudio = new Audio(NMS_AUDIBLE_CHIME_B64);
+                        freshAudio.play().catch(() => {});
+                    } catch (_) {}
+                });
+            }
+        }
     } catch (_) {}
 }
 window.playSound = playSound;
@@ -1833,7 +1872,7 @@ window.playSound = playSound;
 function testSound() {
     playSound(true);
     const enabled = isSoundNotificationEnabled();
-    const msg = enabled ? "🔊 Playing Test Alert Chime (Sound ON)" : "🔊 Playing Test Chime (Sound switch is OFF)";
+    const msg = enabled ? "🔊 Playing Alert Chime (Sound ON)" : "🔊 Playing Alert Chime (Forced Test)";
     if (typeof toast === 'function') {
         toast(msg);
     } else if (typeof showMessage === 'function') {
@@ -2779,6 +2818,16 @@ function renderDesktopRows(list = desktopData) {
         <button
             type="button"
             class="table-action"
+            style="background:#0284c7;color:#fff;font-weight:600;padding:4px 8px;border-radius:4px;"
+            title="Toggle Online / Offline Status"
+            onclick="toggleDesktopStatus(${Number(d.backendId || d.id)})"
+        >
+            TOGGLE
+        </button>
+
+        <button
+            type="button"
+            class="table-action"
             onclick="viewDesktop('${String(d.id).replace(/'/g, "\\'")}')"
         >
             View
@@ -2838,6 +2887,9 @@ async function pingDesktopFromFrontend(desktopId, options = {}) {
         }
 
         let statusChanged = false;
+        const index = (window.desktopData || []).findIndex(
+            d => Number(d.backendId || d.id) === Number(desktopId) || String(d.id) === String(desktopId)
+        );
         if (index >= 0) {
             const oldStatus = desktopData[index].status;
             if (oldStatus && oldStatus !== 'Unknown' && oldStatus !== data.status) {
@@ -3945,6 +3997,16 @@ function renderBackendCameras(
                                 onclick="pingCameraFromFrontend(${camera.id})"
                             >
                                 PING
+                            </button>
+
+                            <button
+                                type="button"
+                                class="table-action"
+                                style="background:#0284c7;color:#fff;font-weight:600;padding:4px 8px;border-radius:4px;"
+                                title="Toggle Online / Offline Status"
+                                onclick="toggleCameraStatus(${camera.id})"
+                            >
+                                TOGGLE
                             </button>
 
                           <button 
@@ -7073,7 +7135,8 @@ async function loadDashboardStats() {
                     let enableAlerts = true;
                     try { const s = JSON.parse(localStorage.getItem('nmsSettings') || '{}'); if(s.alert === false) enableAlerts = false; } catch(e){}
                     alList.innerHTML = '';
-                    const alerts = enableAlerts ? alData.alerts.slice(0, 4) : [];
+                    const activeAlerts = (alData.alerts || []).filter(a => a.status === 'New');
+                    const alerts = enableAlerts ? activeAlerts.slice(0, 4) : [];
                     if (alerts.length === 0) {
                         alList.innerHTML = '<div style="padding:20px;text-align:center;color:#688097">No recent alerts. Everything is healthy.</div>';
                     } else {
@@ -7195,6 +7258,23 @@ async function loadNetworkMap() {
 }
 
 
+window._alertViewMode = window._alertViewMode || 'active';
+
+window.setAlertView = function(mode) {
+    window._alertViewMode = mode;
+    const tabActive = document.getElementById('alertTabActive');
+    const tabAll = document.getElementById('alertTabAll');
+    if (tabActive) {
+        tabActive.style.borderBottom = mode === 'active' ? '2px solid #51b7f7' : '2px solid transparent';
+        tabActive.style.color = mode === 'active' ? '#51b7f7' : '#64798e';
+    }
+    if (tabAll) {
+        tabAll.style.borderBottom = mode === 'all' ? '2px solid #51b7f7' : '2px solid transparent';
+        tabAll.style.color = mode === 'all' ? '#51b7f7' : '#64798e';
+    }
+    loadAlerts();
+};
+
 async function loadAlerts() {
     try {
         const token = localStorage.getItem('access_token');
@@ -7208,25 +7288,52 @@ async function loadAlerts() {
                 try { const s = JSON.parse(localStorage.getItem('nmsSettings') || '{}'); if(s.alert === false) enableAlerts = false; } catch(e){}
                 if(!enableAlerts) data.alerts = [];
 
-                // Count active 'New' alerts for sidebar and header badges
+                // Count active 'New' alerts for sidebar, header, and dashboard badges
                 const activeAlerts = data.alerts.filter(a => a.status === 'New');
                 const sbAlerts = document.getElementById('sidebarAlertsCount');
                 const hrAlerts = document.getElementById('headerAlertsCount');
                 const dashAlerts = document.getElementById('dashAlerts');
+                const repAlerts = document.getElementById('reportActiveAlerts');
                 if (sbAlerts) sbAlerts.textContent = activeAlerts.length;
                 if (hrAlerts) hrAlerts.textContent = activeAlerts.length;
                 if (dashAlerts) dashAlerts.textContent = activeAlerts.length;
+                if (repAlerts) repAlerts.textContent = activeAlerts.length;
+
+                // Update tab counters
+                const activeBadge = document.getElementById('alertActiveBadge');
+                const allBadge = document.getElementById('alertAllBadge');
+                if (activeBadge) activeBadge.textContent = activeAlerts.length;
+                if (allBadge) allBadge.textContent = data.alerts.length;
 
                 const alertList = document.querySelector('.incident-list');
                 if (!alertList) return;
                 alertList.innerHTML = '';
                 
-                if (data.alerts.length === 0) {
-                    alertList.innerHTML = '<div style="padding:40px;text-align:center;color:#688097;font-size:16px;"><b>No Active Alerts</b><br><br><small>Everything is healthy and operational.</small></div>';
+                const currentMode = window._alertViewMode || 'active';
+                const displayAlerts = currentMode === 'active' ? activeAlerts : data.alerts;
+
+                if (displayAlerts.length === 0) {
+                    if (currentMode === 'active') {
+                        alertList.innerHTML = `
+                            <div style="padding:48px 20px;text-align:center;color:#688097;">
+                                <div style="font-size:42px;color:#10b981;margin-bottom:12px;line-height:1;">✓</div>
+                                <b style="font-size:18px;color:#eff5fb;display:block;margin-bottom:8px;">No Active Alerts</b>
+                                <p style="font-size:13px;color:#64798e;margin:0;">All infrastructure incidents have been acknowledged & cleared. Everything is healthy and operational.</p>
+                            </div>
+                        `;
+                    } else {
+                        alertList.innerHTML = `
+                            <div style="padding:48px 20px;text-align:center;color:#688097;">
+                                <div style="font-size:36px;color:#3b82f6;margin-bottom:12px;line-height:1;">ℹ</div>
+                                <b style="font-size:16px;color:#eff5fb;display:block;margin-bottom:6px;">No Alert History</b>
+                                <p style="font-size:13px;color:#64798e;margin:0;">No previous alert incidents recorded in database.</p>
+                            </div>
+                        `;
+                    }
                     return;
                 }
                 
-                data.alerts.forEach(a => {
+                displayAlerts.forEach(a => {
                     const isNew = a.status === 'New';
                     const cssBg = a.severity === 'Critical' ? 'critical-bg' : (a.severity === 'Warning' ? 'warning-bg' : 'info-bg');
                     const cssBorder = a.severity === 'Critical' ? 'critical-border' : (a.severity === 'Warning' ? 'warning-border' : 'info-border');
@@ -7291,14 +7398,98 @@ window.ackAlerts = async function () {
     try {
         const token = localStorage.getItem('access_token');
         const apiBase = (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL) || (typeof NMS_API_BASE !== 'undefined' ? NMS_API_BASE : '');
+        
+        // Immediate optimistic clearing across ALL UI locations
+        const sbAlerts = document.getElementById('sidebarAlertsCount');
+        const hrAlerts = document.getElementById('headerAlertsCount');
+        const dashAlerts = document.getElementById('dashAlerts');
+        const repAlerts = document.getElementById('reportActiveAlerts');
+        const actBadge = document.getElementById('alertActiveBadge');
+        if (sbAlerts) sbAlerts.textContent = '0';
+        if (hrAlerts) hrAlerts.textContent = '0';
+        if (dashAlerts) dashAlerts.textContent = '0';
+        if (repAlerts) repAlerts.textContent = '0';
+        if (actBadge) actBadge.textContent = '0';
+
+        const dashSub = document.querySelector('#dashAlerts + span, #dashAlerts ~ span');
+        if (dashSub) {
+            dashSub.textContent = 'All systems normal';
+            dashSub.className = 'positive';
+        }
+
+        const alList = document.getElementById('dashAlertsList');
+        if (alList) {
+            alList.innerHTML = '<div style="padding:20px;text-align:center;color:#688097">No recent alerts. Everything is healthy.</div>';
+        }
+
+        const alertList = document.querySelector('.incident-list');
+        if (alertList && (!window._alertViewMode || window._alertViewMode === 'active')) {
+            alertList.innerHTML = `
+                <div style="padding:48px 20px;text-align:center;color:#688097;">
+                    <div style="font-size:42px;color:#10b981;margin-bottom:12px;line-height:1;">✓</div>
+                    <b style="font-size:18px;color:#eff5fb;display:block;margin-bottom:8px;">No Active Alerts</b>
+                    <p style="font-size:13px;color:#64798e;margin:0;">All infrastructure incidents have been acknowledged & cleared. Everything is healthy and operational.</p>
+                </div>
+            `;
+        }
+
         const res = await fetch(`${apiBase}/api/alerts/acknowledge`, { method: 'PUT', headers: { 'Authorization': 'Bearer ' + token } });
         if (res.ok) {
-            toast('✓ All alerts acknowledged');
+            toast('✓ All alerts acknowledged & cleared');
             await loadAlerts();
             if (typeof loadDashboardStats === 'function') loadDashboardStats();
             if (typeof checkGlobalAlertsWithSound === 'function') checkGlobalAlertsWithSound();
         }
-    } catch (err) { }
+    } catch (err) {
+        console.error("ackAlerts error:", err);
+    }
+};
+
+window.clearAllAlerts = async function () {
+    try {
+        const token = localStorage.getItem('access_token');
+        const apiBase = (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL) || (typeof NMS_API_BASE !== 'undefined' ? NMS_API_BASE : '');
+        
+        // Immediate optimistic clearing across all locations
+        const sbAlerts = document.getElementById('sidebarAlertsCount');
+        const hrAlerts = document.getElementById('headerAlertsCount');
+        const dashAlerts = document.getElementById('dashAlerts');
+        const repAlerts = document.getElementById('reportActiveAlerts');
+        const actBadge = document.getElementById('alertActiveBadge');
+        const allBadge = document.getElementById('alertAllBadge');
+        if (sbAlerts) sbAlerts.textContent = '0';
+        if (hrAlerts) hrAlerts.textContent = '0';
+        if (dashAlerts) dashAlerts.textContent = '0';
+        if (repAlerts) repAlerts.textContent = '0';
+        if (actBadge) actBadge.textContent = '0';
+        if (allBadge) allBadge.textContent = '0';
+
+        const alList = document.getElementById('dashAlertsList');
+        if (alList) {
+            alList.innerHTML = '<div style="padding:20px;text-align:center;color:#688097">No recent alerts. Everything is healthy.</div>';
+        }
+
+        const alertList = document.querySelector('.incident-list');
+        if (alertList) {
+            alertList.innerHTML = `
+                <div style="padding:48px 20px;text-align:center;color:#688097;">
+                    <div style="font-size:42px;color:#10b981;margin-bottom:12px;line-height:1;">✓</div>
+                    <b style="font-size:18px;color:#eff5fb;display:block;margin-bottom:8px;">No Active Alerts</b>
+                    <p style="font-size:13px;color:#64798e;margin:0;">All alert records have been completely cleared.</p>
+                </div>
+            `;
+        }
+
+        const res = await fetch(`${apiBase}/api/alerts/clear`, { method: 'POST', headers: { 'Authorization': 'Bearer ' + token } });
+        if (res.ok) {
+            toast('✓ All alerts cleared successfully');
+            await loadAlerts();
+            if (typeof loadDashboardStats === 'function') loadDashboardStats();
+            if (typeof checkGlobalAlertsWithSound === 'function') checkGlobalAlertsWithSound();
+        }
+    } catch (err) {
+        console.error("clearAllAlerts error:", err);
+    }
 };
 
 // Reports Unified Linkage
@@ -7983,49 +8174,8 @@ function filterAdminsTable() {
 }
 
 function renderAdminAuditLogs(events) {
-    const listEl = document.getElementById('adminRecentActivityList');
-    if (!listEl) return;
-
-    if (!Array.isArray(events) || events.length === 0) {
-        listEl.innerHTML = '<div style="color:#64748b; padding:10px;">No recent security events recorded.</div>';
-        return;
-    }
-
-    listEl.innerHTML = events.map(evt => {
-        const title = evt.message || evt.action || 'System health verification';
-        const source = evt.source_name || evt.admin || (evt.source_type ? `${evt.source_type} Service` : 'System Service');
-        const severity = String(evt.severity || 'info').toLowerCase();
-        const time = evt.created_at || evt.timestamp || 'Recent';
-
-        let typeClass = 'info';
-        let icon = 'ℹ';
-        if (severity === 'critical' || severity === 'danger') {
-            typeClass = 'critical';
-            icon = '!';
-        } else if (severity === 'warning') {
-            typeClass = 'warning';
-            icon = '⚠';
-        } else if (severity === 'good' || severity === 'success' || severity === 'low') {
-            typeClass = 'good';
-            icon = '✓';
-        } else if (evt.type === 'admin_management') {
-            typeClass = 'warning';
-            icon = '🛡';
-        }
-
-        return `
-            <div class="alert ${typeClass}" style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
-                <div style="display:flex; align-items:center; gap:10px;">
-                    <i>${icon}</i>
-                    <div>
-                        <b style="color:#f8fafc; font-size:13px;">${escapeAdminHtml(title)}</b>
-                        <small style="color:#94a3b8; display:block; font-size:11px;">Source: ${escapeAdminHtml(source)} · Status: ${escapeAdminHtml(evt.severity || evt.status || 'Logged')}</small>
-                    </div>
-                </div>
-                <label style="font-size:11px; color:#64748b;">${escapeAdminHtml(time)}</label>
-            </div>
-        `;
-    }).join('');
+    // Activity section removed from admin panel per user request
+    return;
 }
 
 function openAddAdminModal() {
@@ -8222,4 +8372,140 @@ window.toggleAdminStatus = toggleAdminStatus;
 window.deleteAdmin = deleteAdmin;
 window.filterAdminsTable = filterAdminsTable;
 
+
+
+
+/* =========================================================
+   STATUS TOGGLE & SIMULATION ACTIONS (DEVICES, CCTV, DESKTOPS)
+   ========================================================= */
+
+async function toggleDeviceStatus(deviceId) {
+    const token = localStorage.getItem('access_token');
+    if (!token) return (typeof toast === 'function' ? toast('Login required') : alert('Login required'));
+    if (typeof toast === 'function') toast('Switching device status...');
+    const apiBase = (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL !== undefined && window.APP_CONFIG.API_BASE_URL !== null)
+                    ? window.APP_CONFIG.API_BASE_URL : (typeof NMS_API_BASE !== 'undefined' ? NMS_API_BASE : '');
+    try {
+        const res = await fetch(`${apiBase}/api/devices/${deviceId}/toggle-status`, {
+            method: 'PUT',
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.detail || data.message || 'Toggle failed');
+        
+        const idx = (window.backendDevices || []).findIndex(d => Number(d.id) === Number(deviceId));
+        if (idx >= 0) {
+            window.backendDevices[idx].status = data.status;
+            if (typeof renderBackendDevices === 'function') renderBackendDevices(window.backendDevices);
+        }
+        playSound(true);
+        const icon = data.status === 'Online' ? '✅' : '🚨';
+        if (typeof toast === 'function') toast(`${icon} ${data.message || 'Device ' + data.device_code + ' is now ' + data.status}`);
+        if (typeof loadAlerts === 'function') loadAlerts();
+        if (typeof checkGlobalAlertsWithSound === 'function') checkGlobalAlertsWithSound();
+        if (typeof loadDashboardStats === 'function') loadDashboardStats();
+        return data;
+    } catch (err) {
+        if (typeof toast === 'function') toast('Toggle error: ' + err.message);
+    }
+}
+window.toggleDeviceStatus = toggleDeviceStatus;
+
+async function toggleCameraStatus(cameraId) {
+    const token = localStorage.getItem('access_token');
+    if (!token) return (typeof toast === 'function' ? toast('Login required') : alert('Login required'));
+    if (typeof toast === 'function') toast('Switching CCTV status...');
+    const apiBase = (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL !== undefined && window.APP_CONFIG.API_BASE_URL !== null)
+                    ? window.APP_CONFIG.API_BASE_URL : (typeof NMS_API_BASE !== 'undefined' ? NMS_API_BASE : '');
+    try {
+        const res = await fetch(`${apiBase}/api/cameras/${cameraId}/toggle-status`, {
+            method: 'PUT',
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.detail || data.message || 'Toggle failed');
+        
+        const idx = (window.backendCameras || []).findIndex(c => Number(c.id) === Number(cameraId));
+        if (idx >= 0) {
+            window.backendCameras[idx].status = data.status;
+            if (typeof renderBackendCameras === 'function') renderBackendCameras(window.backendCameras);
+        }
+        playSound(true);
+        const icon = data.status === 'Online' ? '✅' : '🚨';
+        if (typeof toast === 'function') toast(`${icon} ${data.message || 'CCTV ' + data.camera_code + ' is now ' + data.status}`);
+        if (typeof loadAlerts === 'function') loadAlerts();
+        if (typeof checkGlobalAlertsWithSound === 'function') checkGlobalAlertsWithSound();
+        if (typeof loadDashboardStats === 'function') loadDashboardStats();
+        return data;
+    } catch (err) {
+        if (typeof toast === 'function') toast('Toggle error: ' + err.message);
+    }
+}
+window.toggleCameraStatus = toggleCameraStatus;
+
+async function toggleDesktopStatus(desktopId) {
+    const token = localStorage.getItem('access_token');
+    if (!token) return (typeof toast === 'function' ? toast('Login required') : alert('Login required'));
+    if (typeof toast === 'function') toast('Switching desktop status...');
+    const apiBase = (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL !== undefined && window.APP_CONFIG.API_BASE_URL !== null)
+                    ? window.APP_CONFIG.API_BASE_URL : (typeof NMS_API_BASE !== 'undefined' ? NMS_API_BASE : '');
+    try {
+        const res = await fetch(`${apiBase}/api/desktops/${desktopId}/toggle-status`, {
+            method: 'PUT',
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.detail || data.message || 'Toggle failed');
+        
+        const idx = (window.desktopData || []).findIndex(d => Number(d.backendId || d.id) === Number(desktopId));
+        if (idx >= 0) {
+            window.desktopData[idx].status = data.status;
+            if (typeof renderDesktopRows === 'function') renderDesktopRows(window.desktopData);
+        }
+        playSound(true);
+        const icon = data.status === 'Online' ? '✅' : '🚨';
+        if (typeof toast === 'function') toast(`${icon} ${data.message || 'Desktop ' + data.desktop_code + ' is now ' + data.status}`);
+        if (typeof loadAlerts === 'function') loadAlerts();
+        if (typeof checkGlobalAlertsWithSound === 'function') checkGlobalAlertsWithSound();
+        if (typeof loadDashboardStats === 'function') loadDashboardStats();
+        return data;
+    } catch (err) {
+        if (typeof toast === 'function') toast('Toggle error: ' + err.message);
+    }
+}
+window.toggleDesktopStatus = toggleDesktopStatus;
+
+async function simulateQuickAlert(assetType = null) {
+    const token = localStorage.getItem('access_token');
+    if (!token) return (typeof toast === 'function' ? toast('Login required') : alert('Login required'));
+    if (typeof toast === 'function') toast('Simulating status alert...');
+    const apiBase = (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL !== undefined && window.APP_CONFIG.API_BASE_URL !== null)
+                    ? window.APP_CONFIG.API_BASE_URL : (typeof NMS_API_BASE !== 'undefined' ? NMS_API_BASE : '');
+    try {
+        const res = await fetch(`${apiBase}/api/alerts/simulate`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ asset_type: assetType })
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.detail || data.message || 'Simulation failed');
+        playSound(true);
+        const icon = data.new_status === 'Online' ? '✅' : '🚨';
+        if (typeof toast === 'function') toast(`${icon} [ALERT] ${data.message}`);
+        
+        if (typeof loadAlerts === 'function') loadAlerts();
+        if (typeof checkGlobalAlertsWithSound === 'function') checkGlobalAlertsWithSound();
+        if (typeof loadDashboardStats === 'function') loadDashboardStats();
+        if (data.asset_type === 'Device' && typeof refreshDevicesFromBackend === 'function') refreshDevicesFromBackend();
+        if (data.asset_type === 'Camera' && typeof loadCamerasFromBackend === 'function') loadCamerasFromBackend();
+        if (data.asset_type === 'Desktop' && typeof loadDesktopsFromBackend === 'function') loadDesktopsFromBackend();
+        return data;
+    } catch (err) {
+        if (typeof toast === 'function') toast('Simulation error: ' + err.message);
+    }
+}
+window.simulateQuickAlert = simulateQuickAlert;
 

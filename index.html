@@ -126,6 +126,7 @@
       <div class="top-right">
         <div class="live"><i></i> LIVE</div>
         <div class="clock" id="clock">00:00:00</div>
+        <button type="button" class="btn" style="background:rgba(239,68,68,0.18);border:1px solid #ef4444;color:#fca5a5;padding:4px 10px;font-size:12px;border-radius:6px;cursor:pointer;display:inline-flex;align-items:center;gap:4px;font-weight:600;" onclick="simulateQuickAlert()" title="Test Instant Alert Chime & Badge">⚡ Test Alert</button>
         <button class="bell" onclick="document.querySelector('[data-page=&quot;alerts&quot;]').click()">♢<sup id="headerAlertsCount">0</sup></button>
        <div class="user-profile" id="adminButton">
     <div class="admin-avatar">A</div>
@@ -657,6 +658,9 @@
             <button type="button" class="auto-ping-btn" id="triggerDevicesPingBtn" onclick="triggerAutoPingAllDevices(true)">
               ⚡ Ping All Devices Now
             </button>
+            <button type="button" class="auto-ping-btn" style="background:#ef4444;border-color:#ef4444;color:#fff;" onclick="simulateQuickAlert('Device')" title="Simulate Status Change on a Device">
+              ⚡ Simulate Device Alert
+            </button>
           </div>
         </div>
 
@@ -773,6 +777,9 @@
           <div class="auto-ping-actions">
             <button type="button" class="auto-ping-btn" id="triggerCamerasPingBtn" onclick="triggerAutoPingAllCameras(true)">
               ⚡ Ping All CCTV Now
+            </button>
+            <button type="button" class="auto-ping-btn" style="background:#ef4444;border-color:#ef4444;color:#fff;" onclick="simulateQuickAlert('Camera')" title="Simulate Status Change on a Camera">
+              ⚡ Simulate CCTV Alert
             </button>
           </div>
         </div>
@@ -1407,11 +1414,20 @@
 
       <!-- ALERTS -->
       <section class="page" id="alerts">
-        <div class="page-top"><div><span class="crumb">OPERATIONS</span><h2>Alerts & Incidents</h2><p>Monitor and acknowledge infrastructure events.</p></div><button class="btn secondary" onclick="ackAlerts()">✓ Acknowledge All</button></div>
+        <div class="page-top">
+          <div><span class="crumb">OPERATIONS</span><h2>Alerts & Incidents</h2><p>Monitor, acknowledge, and clear infrastructure events.</p></div>
+          <div style="display:flex;gap:10px;align-items:center;">
+            <button class="btn primary" style="background:#ef4444;border-color:#ef4444;font-weight:600;" onclick="simulateQuickAlert()" title="Trigger Real-time Alert Test">⚡ Simulate Status Alert</button>
+            <button class="btn secondary" onclick="ackAlerts()" id="btnAckAlerts" title="Acknowledge and clear all active alerts">✓ Acknowledge All</button>
+            <button class="btn secondary" style="background:#1b2a3a;border-color:#2b425b;color:#cbd5e1;" onclick="clearAllAlerts()" id="btnClearAlerts" title="Clear all alerts from database">🗑 Clear All</button>
+          </div>
+        </div>
+        <div style="display:flex;gap:10px;margin-bottom:12px;border-bottom:1px solid #1a2b3b;padding-bottom:8px;">
+          <button id="alertTabActive" onclick="setAlertView('active')" style="background:none;border:none;border-bottom:2px solid #51b7f7;color:#51b7f7;font-weight:700;font-size:12px;cursor:pointer;padding:6px 14px;">Active Alerts (<span id="alertActiveBadge">0</span>)</button>
+          <button id="alertTabAll" onclick="setAlertView('all')" style="background:none;border:none;border-bottom:2px solid transparent;color:#64798e;font-weight:600;font-size:12px;cursor:pointer;padding:6px 14px;">Alert History (<span id="alertAllBadge">0</span>)</button>
+        </div>
         <div class="card incident-list">
-          <div class="incident critical-border"><div class="severity critical-bg">CRITICAL</div><div><h3>SW-07 is unreachable</h3><p>Production Block · Detected 8 minutes ago · Last response 10:42:11</p></div><button class="btn secondary" onclick="toast('Incident assigned to Network Team')">Assign</button></div>
-          <div class="incident warning-border"><div class="severity warning-bg">WARNING</div><div><h3>CAM-18 high latency</h3><p>Gate-2 · Average response 640ms · Detected 14 minutes ago</p></div><button class="btn secondary" onclick="toast('Camera diagnostic started')">Diagnose</button></div>
-          <div class="incident info-border"><div class="severity info-bg">INFO</div><div><h3>SRV-02 CPU utilization above 80%</h3><p>Data Center · Current utilization 82% · Detected 21 minutes ago</p></div><button class="btn secondary" onclick="toast('Server details opened')">Details</button></div>
+          <div style="padding:40px;text-align:center;color:#688097;"><small>Loading alerts...</small></div>
         </div>
       </section>
 
@@ -2018,20 +2034,6 @@
             </tbody>
           </table>
         </div>
-
-        <!-- RECENT SECURITY & ADMIN ACTIVITIES -->
-        <div class="card" style="padding:20px;">
-          <div class="card-head" style="margin-bottom:14px; display:flex; justify-content:space-between; align-items:center;">
-            <div>
-              <h3 style="margin:0 0 4px 0; font-size:16px;">Recent Security & Admin Activity</h3>
-              <p style="margin:0; font-size:12px; color:#64748b;">System audit trail, administrative events and health status</p>
-            </div>
-            <span class="status good">● Live Audit Log</span>
-          </div>
-          <div id="adminRecentActivityList" class="alerts">
-            <!-- Dynamic events -->
-          </div>
-        </div>
       </section>
 
     </div>
@@ -2092,6 +2094,8 @@
     </div>
 
 <div id="toast"></div>
+
+<audio id="nmsChimePlayer" preload="auto" style="display:none;"></audio>
 
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="config.js"></script>
