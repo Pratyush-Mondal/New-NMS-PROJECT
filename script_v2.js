@@ -27884,6 +27884,37 @@ async function loadDashboardStats() {
 
                 if (hl && data.breakdown) {
 
+                    // Safely update sidebar counters from real backend breakdown
+                    const sbDevs = document.getElementById('sidebarDevicesCount');
+                    const sbCams = document.getElementById('sidebarCamerasCount');
+                    if (sbDevs && data.breakdown.devices && data.breakdown.devices.total != null) {
+                        sbDevs.textContent = data.breakdown.devices.total;
+                    }
+                    if (sbCams && data.breakdown.cameras && data.breakdown.cameras.total != null) {
+                        sbCams.textContent = data.breakdown.cameras.total;
+                    }
+
+                    // Update top-right admin profile
+                    const adminName = localStorage.getItem('admin_name') || 'Pratyush Mondal';
+                    const hName = document.getElementById('headerAdminName');
+                    const hAvatar = document.getElementById('headerAdminAvatar');
+                    const mName = document.getElementById('menuAdminName');
+                    const mAvatar = document.getElementById('menuAdminAvatar');
+                    if (hName) hName.textContent = adminName;
+                    if (mName) mName.textContent = adminName;
+                    const initial = adminName.charAt(0).toUpperCase() || 'P';
+                    if (hAvatar && !hAvatar.querySelector('img')) hAvatar.textContent = initial;
+                    if (mAvatar && !mAvatar.querySelector('img')) mAvatar.textContent = initial;
+
+                    // Pre-fetch device and camera inventory in background if not already loaded
+                    if (typeof loadDevicesFromBackend === 'function' && (!window.backendDevices || !window.backendDevices.length)) {
+                        loadDevicesFromBackend();
+                    }
+                    if (typeof loadCamerasFromBackend === 'function' && (!window.backendCameras || !window.backendCameras.length)) {
+                        loadCamerasFromBackend();
+                    }
+
+
                     // Update CCTV summary numbers immediately from dashboard stats
 
                     if (data.breakdown.cameras) {
@@ -29532,15 +29563,13 @@ window.generateReport = function () {
 
 document.addEventListener('DOMContentLoaded', () => {
 
-
-
     setTimeout(loadNetworkMap, 1200);
 
+    setTimeout(() => { if (typeof loadDevicesFromBackend === 'function') loadDevicesFromBackend(); }, 1400);
 
+    setTimeout(() => { if (typeof loadCamerasFromBackend === 'function') loadCamerasFromBackend(); }, 1600);
 
     setTimeout(loadAlerts, 1800);
-
-
 
 });
 

@@ -4741,9 +4741,6 @@ def automatic_cctv_monitoring_loop():
     )
 
 
-from app.extra_routes import router as extra_router
-app.include_router(extra_router)
-
 # ==========================================================
 # START AUTOMATIC MONITORING
 # ==========================================================

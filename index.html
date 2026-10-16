@@ -96,8 +96,8 @@
     <div class="nav-title">MAIN</div>
     <nav>
       <a href="#dashboard" class="nav active" data-page="dashboard"><span>⌂</span>Dashboard</a>
-      <a href="#devices" class="nav" data-page="devices"><span>◈</span>Devices <em id="sidebarDevicesCount">0</em></a>
-      <a href="#cameras" class="nav" data-page="cameras"><span>▣</span>CCTV Cameras <em id="sidebarCamerasCount">0</em></a>
+      <a href="#devices" class="nav" data-page="devices"><span>◈</span>Devices <em id="sidebarDevicesCount">19</em></a>
+      <a href="#cameras" class="nav" data-page="cameras"><span>▣</span>CCTV Cameras <em id="sidebarCamerasCount">58</em></a>
       <!-- ADD THIS -->
       <a href="#network" class="nav" data-page="network">
           <span>⌁</span>Network Map </a>
@@ -129,11 +129,11 @@
         <button type="button" class="btn" style="background:rgba(239,68,68,0.18);border:1px solid #ef4444;color:#fca5a5;padding:4px 10px;font-size:12px;border-radius:6px;cursor:pointer;display:inline-flex;align-items:center;gap:4px;font-weight:600;" onclick="simulateQuickAlert()" title="Test Instant Alert Chime & Badge">⚡ Test Alert</button>
         <button class="bell" onclick="document.querySelector('[data-page=&quot;alerts&quot;]').click()">♢<sup id="headerAlertsCount">0</sup></button>
        <div class="user-profile" id="adminButton">
-    <div class="admin-avatar">A</div>
+    <div class="admin-avatar" id="headerAdminAvatar">P</div>
 
     <div class="admin-info">
-        <strong>Administrator</strong>
-        <small>System Admin</small>
+        <strong id="headerAdminName">Pratyush Mondal</strong>
+        <small id="headerAdminRole">System Admin</small>
     </div>
 
     <span class="admin-arrow">▼</span>
@@ -141,10 +141,10 @@
 
 <div class="admin-menu" id="adminMenu">
     <div class="admin-menu-header">
-        <div class="admin-large-avatar">A</div>
+        <div class="admin-large-avatar" id="menuAdminAvatar">P</div>
         <div>
-            <strong>Administrator</strong>
-            <small>System Admin</small>
+            <strong id="menuAdminName">Pratyush Mondal</strong>
+            <small id="menuAdminRole">System Admin</small>
         </div>
     </div>
 
@@ -2099,7 +2099,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="config.js"></script>
-<script src="script_v2.js?v=20261016"></script>
+<script src="script_v2.js?v=20261016_fixed"></script>
 
 <script type="text/javascript">
 function googleTranslateElementInit() {
