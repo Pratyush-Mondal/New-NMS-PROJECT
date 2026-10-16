@@ -41,7 +41,7 @@ def _init_pool():
             try:
                 _db_pool = mysql.connector.pooling.MySQLConnectionPool(
                     pool_name="nms_main_pool",
-                    pool_size=10,
+                    pool_size=32,
                     pool_reset_session=True,
                     host=host,
                     port=port,
@@ -49,7 +49,7 @@ def _init_pool():
                     password=password,
                     database=database,
                     ssl_disabled=False,
-                    connection_timeout=5
+                    connection_timeout=8
                 )
                 print("[DB Pool Initialized] Cloud connection pool ready (SSL)")
                 return
@@ -57,14 +57,14 @@ def _init_pool():
                 print(f"[DB Pool SSL init fallback]: {e}")
                 _db_pool = mysql.connector.pooling.MySQLConnectionPool(
                     pool_name="nms_main_pool",
-                    pool_size=10,
+                    pool_size=32,
                     pool_reset_session=True,
                     host=host,
                     port=port,
                     user=user,
                     password=password,
                     database=database,
-                    connection_timeout=5
+                    connection_timeout=8
                 )
                 print("[DB Pool Initialized] Cloud connection pool ready (plain)")
                 return
