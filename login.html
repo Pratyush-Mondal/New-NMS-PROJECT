@@ -524,6 +524,10 @@
         // Restore remembered email on page load
         document.addEventListener("DOMContentLoaded", () => {
             try {
+                if (localStorage.getItem("access_token") && localStorage.getItem("loggedIn") === "true") {
+                    window.location.replace("index.html#dashboard");
+                    return;
+                }
                 const savedEmail = localStorage.getItem("nms_remembered_email");
                 if (savedEmail) {
                     emailInput.value = savedEmail;
