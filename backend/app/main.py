@@ -163,10 +163,10 @@ app.include_router(extra_router)
 def get_frontend_candidates():
     root_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
     return [
+        root_dir,
         os.path.join(root_dir, "frontend"),
         os.path.join(root_dir, "Neo_Metaliks_NMS_Desktop_FIXED", "Neo_Metaliks_NMS_CCTV_Device_Ready"),
         os.path.join(root_dir, "Neo_Metaliks_NMS_Desktop_FIXED"),
-        root_dir
     ]
 
 def find_frontend_file(filename: str):
@@ -2763,6 +2763,11 @@ def get_cameras(
 ):
 
     db = get_db_connection()
+    if db is None:
+        raise HTTPException(
+            status_code=500,
+            detail="Database connection failed."
+        )
     cursor = None
 
     try:
@@ -2813,7 +2818,8 @@ def get_cameras(
         if cursor:
             cursor.close()
 
-        db.close()
+        if db:
+            db.close()
 
 
 # ==========================================

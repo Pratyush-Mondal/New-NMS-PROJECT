@@ -145,23 +145,27 @@ def get_admin_from_token(token: str):
         try:
             cursor = connection.cursor(dictionary=True)
 
-            cursor.execute(
-                """
-                SELECT
-                    id,
-                    name,
-                    email,
-                    phone,
-                    department,
-                    location,
-                    profile_image,
-                    is_active
-                FROM admins
-                WHERE id = %s
-                LIMIT 1
-                """,
-                (int(admin_id),),
-            )
+            try:
+                aid = int(admin_id)
+                cursor.execute(
+                    """
+                    SELECT id, name, email, phone, department, location, profile_image, is_active
+                    FROM admins
+                    WHERE id = %s
+                    LIMIT 1
+                    """,
+                    (aid,),
+                )
+            except (ValueError, TypeError):
+                cursor.execute(
+                    """
+                    SELECT id, name, email, phone, department, location, profile_image, is_active
+                    FROM admins
+                    WHERE email = %s
+                    LIMIT 1
+                    """,
+                    (str(admin_id).strip().lower(),),
+                )
 
             admin = cursor.fetchone()
 
