@@ -1,0 +1,4911 @@
+import sys
+import io
+if sys.platform == "win32":
+    try:
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
+from fastapi import FastAPI
+from pydantic import BaseModel
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, Depends, HTTPException
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi import UploadFile, File
+from fastapi.staticfiles import StaticFiles
+import os
+import platform
+import re
+import subprocess
+import ipaddress
+import threading
+import time
+from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import socket
+import errno
+import shutil
+import random
+import ipaddress
+import platform
+from app.auth import (
+    authenticate_admin,
+    create_access_token,
+    get_admin_from_token
+)
+from app.database import get_db_connection
+
+
+
+def is_cloud_environment() -> bool:
+    """Detect if running in a cloud container (Render, Vercel, Railway, Fly, etc.)"""
+    if os.environ.get("RENDER") or os.environ.get("RENDER_SERVICE_ID") or os.environ.get("VERCEL") or os.environ.get("FLY_ALLOC_ID") or os.environ.get("IS_CLOUD"):
+        return True
+    if platform.system().lower() != "windows":
+        return True
+    return False
+
+
+def is_private_ip(ip_address: str) -> bool:
+    """Check if the IP is private (RFC 1918), loopback, link-local, or reserved."""
+    if not ip_address:
+        return False
+    try:
+        ip = ipaddress.ip_address(str(ip_address).strip())
+        return ip.is_private or ip.is_loopback or ip.is_reserved or ip.is_link_local
+    except Exception:
+        return False
+
+def execute_network_ping(ip_address: str, timeout_sec: float = 1.0) -> tuple[bool | None, float | None]:
+    """
+    Resilient ping check:
+    1. If running in cloud environment and target is a private plant IP (RFC 1918),
+       return (None, None) so caller reads the live status from the plant LAN probe in TiDB!
+    2. Try system ping binary if available.
+    3. Fallback to TCP socket connection probes on common service ports.
+    Never throws unhandled exceptions; returns (is_online, latency_ms).
+    """
+    if not ip_address or not str(ip_address).strip():
+        return False, None
+    
+    ip_str = str(ip_address).strip()
+
+    if is_cloud_environment() and is_private_ip(ip_str):
+        return None, None
+    
+    # 1. Try system ping if binary exists
+    ping_bin = shutil.which("ping")
+    if ping_bin:
+        try:
+            if platform.system().lower() == "windows":
+                cmd = [ping_bin, "-n", "1", "-w", str(int(timeout_sec * 1000)), ip_str]
+            else:
+                cmd = [ping_bin, "-c", "1", "-W", str(max(1, int(timeout_sec))), ip_str]
+            
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_sec + 1.0)
+            if res.returncode == 0:
+                out = res.stdout + res.stderr
+                match = re.search(r"time[=<]\s*(\d+(?:\.\d+)?)\s*ms", out, re.IGNORECASE)
+                lat = float(match.group(1)) if match else 1.0
+                return True, lat
+        except Exception:
+            pass
+            
+    # 2. Socket-based connectivity probe (fallback for cloud/containers without ping binary or raw ICMP)
+    probe_ports = [80, 554, 443, 8000]
+    sock_timeout = min(timeout_sec, 0.2)
+    
+    for port in probe_ports:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(sock_timeout)
+        t_start = time.perf_counter()
+        try:
+            ret = s.connect_ex((ip_str, port))
+            t_elapsed = (time.perf_counter() - t_start) * 1000
+            if ret == 0 or ret in (getattr(errno, 'ECONNREFUSED', 111), 111, 10061):
+                return True, round(max(0.5, t_elapsed), 2)
+        except Exception:
+            pass
+        finally:
+            try:
+                s.close()
+            except Exception:
+                pass
+                
+    return False, None
+
+
+app = FastAPI(
+    title="Neo Metaliks NMS API",
+    version="1.0.0"
+)
+# ==========================================
+# PROFILE PHOTO STORAGE
+# ==========================================
+
+import os
+import shutil
+
+UPLOAD_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(__file__)),
+    "uploads",
+    "profile_photos"
+)
+
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+app.mount(
+    "/uploads",
+    StaticFiles(directory=os.path.join(
+        os.path.dirname(os.path.dirname(__file__)),
+        "uploads"
+    )),
+    name="uploads"
+)
+security = HTTPBearer()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"]
+)
+
+from app.extra_routes import router as extra_router, record_status_change_alert
+app.include_router(extra_router)
+
+# =========================================================
+# ROOT
+# =========================================================
+
+def get_frontend_candidates():
+    root_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+    return [
+        os.path.join(root_dir, "frontend"),
+        os.path.join(root_dir, "Neo_Metaliks_NMS_Desktop_FIXED", "Neo_Metaliks_NMS_CCTV_Device_Ready"),
+        os.path.join(root_dir, "Neo_Metaliks_NMS_Desktop_FIXED"),
+        root_dir
+    ]
+
+def find_frontend_file(filename: str):
+    clean = filename.lstrip("/\\")
+    for d in get_frontend_candidates():
+        path = os.path.join(d, clean)
+        if os.path.isfile(path):
+            return path
+    return None
+
+from starlette.responses import FileResponse
+
+@app.get("/")
+def root():
+    login_path = find_frontend_file("login.html")
+    if login_path:
+        return FileResponse(login_path)
+    return {
+        "success": True,
+        "message": "Neo Metaliks NMS Backend is running"
+    }
+
+
+# =========================================================
+# HEALTH CHECK
+# =========================================================
+
+@app.get("/api/health")
+def health_check():
+    return {
+        "success": True,
+        "status": "healthy"
+    }
+
+
+# =========================================================
+# MYSQL DATABASE TEST
+# =========================================================
+
+@app.get("/api/db-test")
+def database_test():
+
+    connection = get_db_connection()
+
+    if connection is None:
+        return {
+            "success": False,
+            "database": "connection failed"
+        }
+
+    try:
+        cursor = connection.cursor()
+
+        cursor.execute("SELECT DATABASE()")
+        result = cursor.fetchone()
+
+        cursor.close()
+        connection.close()
+
+        return {
+            "success": True,
+            "database": result[0]
+        }
+
+    except Exception as error:
+
+        try:
+            connection.close()
+        except Exception:
+            pass
+
+        return {
+            "success": False,
+            "error": str(error)
+        }
+
+
+# =========================================================
+# LOGIN REQUEST MODEL
+# =========================================================
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+class ProfileUpdateRequest(BaseModel):
+    name: str
+    email: str
+    phone: str | None = None
+    department: str | None = None
+    location: str | None = None
+
+# =========================================================
+# ADMIN LOGIN API
+# =========================================================
+
+@app.post("/api/auth/login")
+def login_admin(data: LoginRequest):
+
+    email = data.email.strip().lower()
+
+    admin = authenticate_admin(
+        email,
+        data.password
+    )
+
+    if admin is None:
+        return {
+            "success": False,
+            "message": "Invalid email or password."
+        }
+
+    access_token = create_access_token(
+        admin["id"],
+        admin["email"]
+    )
+
+    return {
+        "success": True,
+        "message": "Login successful.",
+        "access_token": access_token,
+        "token_type": "bearer",
+        "admin": {
+            "id": admin["id"],
+            "name": admin["name"],
+            "email": admin["email"],
+            "phone": admin["phone"],
+            "department": admin["department"],
+            "location": admin["location"]
+        }
+    }
+@app.get("/api/auth/me")
+def get_current_admin(
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    token = credentials.credentials
+
+    admin = get_admin_from_token(token)
+
+    if admin is None:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or expired token."
+        )
+
+    return {
+        "success": True,
+        "admin": {
+            "id": admin["id"],
+            "name": admin["name"],
+            "email": admin["email"],
+            "phone": admin["phone"],
+            "department": admin["department"],
+            "location": admin["location"],
+            "profile_image": admin.get("profile_image")
+        }
+    }
+@app.put("/api/auth/profile")
+def update_admin_profile(
+    data: ProfileUpdateRequest,
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    token = credentials.credentials
+
+    # Token verify
+    admin = get_admin_from_token(token)
+
+    if admin is None:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or expired token."
+        )
+
+    # Basic validation
+    name = data.name.strip()
+    email = data.email.strip().lower()
+    phone = data.phone.strip() if data.phone else None
+    department = data.department.strip() if data.department else None
+    location = data.location.strip() if data.location else None
+
+    if not name:
+        raise HTTPException(
+            status_code=400,
+            detail="Name is required."
+        )
+
+    if not email:
+        raise HTTPException(
+            status_code=400,
+            detail="Email is required."
+        )
+
+    connection = get_db_connection()
+
+    if connection is None:
+        raise HTTPException(
+            status_code=500,
+            detail="Database connection failed."
+        )
+
+    cursor = None
+
+    try:
+        cursor = connection.cursor(dictionary=True)
+
+        # Check whether another admin already uses this email
+        cursor.execute(
+            """
+            SELECT id
+            FROM admins
+            WHERE email = %s AND id != %s
+            LIMIT 1
+            """,
+            (email, admin["id"])
+        )
+
+        existing_admin = cursor.fetchone()
+
+        if existing_admin:
+            raise HTTPException(
+                status_code=400,
+                detail="This email is already used by another admin."
+            )
+
+        # Update MySQL record
+        cursor.execute(
+            """
+            UPDATE admins
+            SET
+                name = %s,
+                email = %s,
+                phone = %s,
+                department = %s,
+                location = %s
+            WHERE id = %s
+            """,
+            (
+                name,
+                email,
+                phone,
+                department,
+                location,
+                admin["id"]
+            )
+        )
+
+        connection.commit()
+
+        return {
+            "success": True,
+            "message": "Administrator profile updated successfully.",
+            "admin": {
+                "id": admin["id"],
+                "name": name,
+                "email": email,
+                "phone": phone,
+                "department": department,
+                "location": location
+            }
+        }
+
+    except HTTPException:
+        connection.rollback()
+        raise
+
+    except Exception as error:
+        connection.rollback()
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(error)
+        )
+
+    finally:
+        if cursor:
+            cursor.close()
+
+        connection.close()
+        # ==========================================
+# ADMIN PROFILE PHOTO UPLOAD
+# ==========================================
+
+@app.post("/api/auth/profile-photo")
+async def upload_admin_profile_photo(
+    file: UploadFile = File(...),
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    token = credentials.credentials
+
+    # Login token verify
+    admin = get_admin_from_token(token)
+
+    if admin is None:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or expired token."
+        )
+
+    # Only JPG and PNG allowed
+    allowed_types = {
+        "image/jpeg": ".jpg",
+        "image/png": ".png"
+    }
+
+    if file.content_type not in allowed_types:
+        raise HTTPException(
+            status_code=400,
+            detail="Only JPG and PNG images are allowed."
+        )
+
+    # Read image
+    contents = await file.read()
+
+    # Maximum 2 MB
+    if len(contents) > 2 * 1024 * 1024:
+        raise HTTPException(
+            status_code=400,
+            detail="Image size must be less than 2MB."
+        )
+
+    extension = allowed_types[file.content_type]
+
+    filename = f"admin_{admin['id']}{extension}"
+
+    file_path = os.path.join(
+        UPLOAD_DIR,
+        filename
+    )
+
+    # Delete previous photo
+    for old_extension in [".jpg", ".png"]:
+        old_file = os.path.join(
+            UPLOAD_DIR,
+            f"admin_{admin['id']}{old_extension}"
+        )
+
+        if os.path.exists(old_file):
+            try:
+                os.remove(old_file)
+            except OSError:
+                pass
+
+    # Save new image
+    try:
+        with open(file_path, "wb") as buffer:
+            buffer.write(contents)
+
+    except OSError as error:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Unable to save profile photo: {error}"
+        )
+
+    # Database path
+    profile_image = (
+        f"/uploads/profile_photos/{filename}"
+    )
+
+    connection = get_db_connection()
+
+    if connection is None:
+
+        try:
+            os.remove(file_path)
+        except OSError:
+            pass
+
+        raise HTTPException(
+            status_code=500,
+            detail="Database connection failed."
+        )
+
+    cursor = None
+
+    try:
+
+        cursor = connection.cursor()
+
+        cursor.execute(
+            """
+            UPDATE admins
+            SET profile_image = %s
+            WHERE id = %s
+            """,
+            (
+                profile_image,
+                admin["id"]
+            )
+        )
+
+        connection.commit()
+
+    except Exception as error:
+
+        connection.rollback()
+
+        try:
+            os.remove(file_path)
+        except OSError:
+            pass
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(error)
+        )
+
+    finally:
+
+        if cursor:
+            cursor.close()
+
+        connection.close()
+
+    return {
+        "success": True,
+        "message": "Profile photo uploaded successfully.",
+        "profile_image": profile_image
+    }
+
+
+# ==========================================
+# DEVICES - GET ALL DEVICES
+# ==========================================
+
+@app.get("/api/devices")
+def get_devices(
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    
+    token = credentials.credentials
+
+    # Verify logged-in admin
+    admin = get_admin_from_token(token)
+
+    if admin is None:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or expired token."
+        )
+
+    connection = get_db_connection()
+
+    if connection is None:
+        raise HTTPException(
+            status_code=500,
+            detail="Database connection failed."
+        )
+
+    cursor = None
+
+    try:
+
+        cursor = connection.cursor(dictionary=True)
+
+        cursor.execute(
+            """
+            SELECT
+                id,
+                device_code,
+                device_name,
+                device_type,
+                ip_address,
+                mac_address,
+                location,
+                description,
+                status,
+                monitoring_enabled,
+                monitoring_interval,
+                last_check,
+                last_latency_ms,
+                uptime_percent,
+                created_at,
+                updated_at
+            FROM devices
+            ORDER BY id DESC
+            """
+        )
+
+        devices = cursor.fetchall()
+
+        return {
+            "success": True,
+            "count": len(devices),
+            "devices": devices
+        }
+
+    except Exception as error:
+
+     raise HTTPException(
+            status_code=500,
+            detail=str(error)
+        )
+
+    finally:
+
+        if cursor:
+              cursor.close()
+
+    connection.close()
+
+
+# ==========================================
+# DESKTOP CREATE MODEL
+# ==========================================
+
+class DesktopCreateRequest(BaseModel):
+
+    desktop_code: str
+    department: str | None = None
+    location: str | None = None
+    ip_address: str
+    operating_system: str | None = None
+
+    cpu_usage: float = 0
+    ram_usage: float = 0
+
+    status: str = "Unknown"
+
+    monitoring_enabled: bool = True
+    monitoring_interval: int = 30
+
+# ==========================================
+# DESKTOP MONITORING SETTINGS MODEL
+# ==========================================
+
+class DesktopMonitoringSettingsRequest(BaseModel):
+
+    enabled: bool
+    selected_location: str | None = None
+    interval: int | None = None
+
+      # ==========================================
+# DESKTOPS - GET ALL DESKTOPS
+# ==========================================
+
+@app.get("/api/desktops")
+def get_desktops(
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+
+    # ------------------------------------------
+    # VERIFY LOGGED-IN ADMIN
+    # ------------------------------------------
+
+    token = credentials.credentials
+
+    admin = get_admin_from_token(token)
+
+    if admin is None:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or expired token."
+        )
+
+    # ------------------------------------------
+    # DATABASE CONNECTION
+    # ------------------------------------------
+
+    connection = get_db_connection()
+
+    if connection is None:
+        raise HTTPException(
+            status_code=500,
+            detail="Database connection failed."
+        )
+
+    cursor = None
+
+    try:
+
+        cursor = connection.cursor(dictionary=True)
+
+        # ------------------------------------------
+        # GET ALL DESKTOPS
+        # ------------------------------------------
+
+        cursor.execute(
+            """
+            SELECT
+                id,
+                desktop_code,
+                department,
+                location,
+                ip_address,
+                operating_system,
+                cpu_usage,
+                ram_usage,
+                status,
+                monitoring_enabled,
+                monitoring_interval,
+                last_check,
+                last_latency_ms,
+                total_checks,
+                successful_checks,
+                uptime_percent,
+                created_at,
+                updated_at
+            FROM desktops
+            ORDER BY id DESC
+            """
+        )
+
+        desktops = cursor.fetchall()
+
+        return {
+            "success": True,
+            "count": len(desktops),
+            "desktops": desktops
+        }
+
+    except Exception as error:
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(error)
+        )
+
+    finally:
+
+        if cursor:
+            cursor.close()
+
+        connection.close()
+
+
+# ==========================================
+# DESKTOPS - CREATE DESKTOP
+# ==========================================
+
+@app.post("/api/desktops")
+def create_desktop(
+    data: DesktopCreateRequest,
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+
+    # ------------------------------------------
+    # VERIFY LOGGED-IN ADMIN
+    # ------------------------------------------
+
+    token = credentials.credentials
+
+    admin = get_admin_from_token(token)
+
+    if admin is None:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or expired token."
+        )
+
+    # ------------------------------------------
+    # BASIC VALIDATION
+    # ------------------------------------------
+
+    desktop_code = data.desktop_code.strip()
+    ip_address = data.ip_address.strip()
+
+    if not desktop_code:
+        raise HTTPException(
+            status_code=400,
+            detail="Desktop ID is required."
+        )
+
+    if not ip_address:
+        raise HTTPException(
+            status_code=400,
+            detail="IP address is required."
+        )
+
+    if data.monitoring_interval <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Monitoring interval must be greater than 0."
+        )
+
+    if data.cpu_usage < 0 or data.cpu_usage > 100:
+        raise HTTPException(
+            status_code=400,
+            detail="CPU usage must be between 0 and 100."
+        )
+
+    if data.ram_usage < 0 or data.ram_usage > 100:
+        raise HTTPException(
+            status_code=400,
+            detail="RAM usage must be between 0 and 100."
+        )
+
+    # ------------------------------------------
+    # DATABASE CONNECTION
+    # ------------------------------------------
+
+    connection = get_db_connection()
+
+    if connection is None:
+        raise HTTPException(
+            status_code=500,
+            detail="Database connection failed."
+        )
+
+    cursor = None
+
+    try:
+
+        cursor = connection.cursor(dictionary=True)
+
+        # ------------------------------------------
+        # CHECK DUPLICATE DESKTOP ID
+        # ------------------------------------------
+
+        cursor.execute(
+            """
+            SELECT id
+            FROM desktops
+            WHERE desktop_code = %s
+            LIMIT 1
+            """,
+            (desktop_code,)
+        )
+
+        existing_desktop = cursor.fetchone()
+
+        if existing_desktop:
+
+            raise HTTPException(
+                status_code=400,
+                detail="Desktop ID already exists."
+            )
+
+        # ------------------------------------------
+        # CHECK DUPLICATE IP
+        # ------------------------------------------
+
+        cursor.execute(
+            """
+            SELECT id
+            FROM desktops
+            WHERE ip_address = %s
+            LIMIT 1
+            """,
+            (ip_address,)
+        )
+
+        existing_ip = cursor.fetchone()
+
+        if existing_ip:
+
+            raise HTTPException(
+                status_code=400,
+                detail="IP address already exists."
+            )
+
+        # ------------------------------------------
+        # INSERT DESKTOP
+        # ------------------------------------------
+
+        cursor.execute(
+            """
+            INSERT INTO desktops (
+                desktop_code,
+                department,
+                location,
+                ip_address,
+                operating_system,
+                cpu_usage,
+                ram_usage,
+                status,
+                monitoring_enabled,
+                monitoring_interval
+            )
+            VALUES (
+                %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s
+            )
+            """,
+            (
+                desktop_code,
+                data.department,
+                data.location,
+                ip_address,
+                data.operating_system,
+                data.cpu_usage,
+                data.ram_usage,
+                data.status,
+                1 if data.monitoring_enabled else 0,
+                data.monitoring_interval
+            )
+        )
+
+        connection.commit()
+
+        desktop_id = cursor.lastrowid
+
+        # ------------------------------------------
+        # GET CREATED DESKTOP
+        # ------------------------------------------
+
+        cursor.execute(
+            """
+            SELECT
+                id,
+                desktop_code,
+                department,
+                location,
+                ip_address,
+                operating_system,
+                cpu_usage,
+                ram_usage,
+                status,
+                monitoring_enabled,
+                monitoring_interval,
+                last_check,
+                last_latency_ms,
+                total_checks,
+                successful_checks,
+                uptime_percent,
+                created_at,
+                updated_at
+            FROM desktops
+            WHERE id = %s
+            """,
+            (desktop_id,)
+        )
+
+        desktop = cursor.fetchone()
+
+        return {
+            "success": True,
+            "message": "Desktop created successfully.",
+            "desktop": desktop
+        }
+
+    except HTTPException:
+
+        connection.rollback()
+        raise
+
+    except Exception as error:
+
+        connection.rollback()
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(error)
+        )
+
+    finally:
+
+        if cursor:
+            cursor.close()
+
+        connection.close()
+
+# ==========================================================
+# DESKTOP - UPDATE
+# ==========================================================
+
+class DesktopUpdateRequest(BaseModel):
+    desktop_code: str | None = None
+    department: str | None = None
+    location: str | None = None
+    ip_address: str | None = None
+    operating_system: str | None = None
+    cpu_usage: float | None = None
+    ram_usage: float | None = None
+    status: str | None = None
+    monitoring_enabled: bool | None = None
+    monitoring_interval: int | None = None
+
+
+
+# ==========================================================
+# DESKTOP - DELETE
+# ==========================================================
+
+@app.delete("/api/desktops/{desktop_id}")
+def delete_desktop(
+    desktop_id: int,
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    token = credentials.credentials
+    get_admin_from_token(token)
+
+    db = get_db_connection()
+    cursor = None
+
+    try:
+        cursor = db.cursor(dictionary=True)
+
+        # ------------------------------------------
+        # CHECK DESKTOP
+        # ------------------------------------------
+
+        cursor.execute(
+            """
+            SELECT
+                id,
+                desktop_code
+            FROM desktops
+            WHERE id = %s
+            LIMIT 1
+            """,
+            (desktop_id,)
+        )
+
+        desktop = cursor.fetchone()
+
+        if not desktop:
+            raise HTTPException(
+                status_code=404,
+                detail="Desktop not found."
+            )
+
+        # ------------------------------------------
+        # DELETE
+        # ------------------------------------------
+
+        cursor.execute(
+            """
+            DELETE FROM desktops
+            WHERE id = %s
+            """,
+            (desktop_id,)
+        )
+
+        db.commit()
+
+        return {
+            "success": True,
+            "message": "Desktop deleted successfully.",
+            "desktop_id": desktop_id,
+            "desktop_code": desktop["desktop_code"]
+        }
+
+    except HTTPException:
+        db.rollback()
+        raise
+
+    except Exception as error:
+        db.rollback()
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(error)
+        )
+
+    finally:
+
+        if cursor:
+            cursor.close()
+
+        db.close()
+
+
+
+    token = credentials.credentials
+
+    admin = get_admin_from_token(token)
+
+    if admin is None:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or expired token."
+        )
+
+    db = get_db_connection()
+
+    if db is None:
+        raise HTTPException(
+            status_code=500,
+            detail="Database connection failed."
+        )
+
+    cursor = None
+
+    try:
+
+        cursor = db.cursor(dictionary=True)
+
+        cursor.execute(
+            """
+            SELECT
+                id,
+                enabled,
+                selected_location,
+                updated_at
+            FROM desktop_monitoring_settings
+            WHERE id = 1
+            LIMIT 1
+            """
+        )
+
+        settings = cursor.fetchone()
+
+        if settings is None:
+
+            cursor.execute(
+                """
+                INSERT INTO desktop_monitoring_settings
+                    (id, enabled, selected_location)
+                VALUES
+                    (1, 0, NULL)
+                """
+            )
+
+            db.commit()
+
+            settings = {
+                "id": 1,
+                "enabled": 0,
+                "selected_location": None
+            }
+
+        return {
+            "success": True,
+            "enabled": bool(settings["enabled"]),
+            "selected_location": settings["selected_location"],
+            "updated_at": settings.get("updated_at")
+        }
+
+    except Exception as error:
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(error)
+        )
+
+    finally:
+
+        if cursor:
+            cursor.close()
+
+        db.close()
+
+
+
+    token = credentials.credentials
+
+    admin = get_admin_from_token(token)
+
+    if admin is None:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or expired token."
+        )
+
+    selected_location = (
+        data.selected_location.strip()
+        if data.selected_location
+        else None
+    )
+
+    # ------------------------------------------
+    # ON হলে location অবশ্যই লাগবে
+    # ------------------------------------------
+
+    if data.enabled and not selected_location:
+
+        raise HTTPException(
+            status_code=400,
+            detail="Please select a desktop location."
+        )
+
+    db = get_db_connection()
+
+    if db is None:
+        raise HTTPException(
+            status_code=500,
+            detail="Database connection failed."
+        )
+
+    cursor = None
+
+    try:
+
+        cursor = db.cursor()
+
+        # ------------------------------------------
+        # SAVE MASTER MONITORING STATE
+        # ------------------------------------------
+
+        cursor.execute(
+            """
+            UPDATE desktop_monitoring_settings
+            SET
+                enabled = %s,
+                selected_location = %s
+            WHERE id = 1
+            """,
+            (
+                1 if data.enabled else 0,
+                selected_location
+            )
+        )
+
+        # ------------------------------------------
+        # OFF = STOP ALL DESKTOP MONITORING
+        # ------------------------------------------
+
+        if not data.enabled:
+
+            cursor.execute(
+                """
+                UPDATE desktops
+                SET monitoring_enabled = 0
+                """
+            )
+
+        # ------------------------------------------
+        # ON = ONLY SELECTED LOCATION
+        # ------------------------------------------
+
+        else:
+
+            # First stop all desktops
+            cursor.execute(
+                """
+                UPDATE desktops
+                SET monitoring_enabled = 0
+                """
+            )
+
+            # Then enable selected location
+            if selected_location and selected_location.strip().lower() in ["all", "all locations"]:
+                cursor.execute(
+                    """
+                    UPDATE desktops
+                    SET monitoring_enabled = 1
+                    """
+                )
+            else:
+                cursor.execute(
+                    """
+                    UPDATE desktops
+                    SET monitoring_enabled = 1
+                    WHERE LOWER(TRIM(location))
+                        = LOWER(TRIM(%s))
+                    """,
+                    (selected_location,)
+                )
+
+        db.commit()
+
+        return {
+            "success": True,
+            "message": (
+                "Desktop monitoring enabled."
+                if data.enabled
+                else "Desktop monitoring disabled."
+            ),
+            "enabled": data.enabled,
+            "selected_location": selected_location
+        }
+
+    except Exception as error:
+
+        db.rollback()
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(error)
+        )
+
+    finally:
+
+        if cursor:
+            cursor.close()
+
+        db.close()
+
+        # ==========================================
+# DEVICE CREATE MODEL
+# ==========================================
+
+class DeviceCreateRequest(BaseModel):
+    device_code: str
+    device_name: str
+    device_type: str
+    ip_address: str
+    mac_address: str | None = None
+    location: str | None = None
+    description: str | None = None
+    monitoring_enabled: bool = True
+    monitoring_interval: int = 30
+
+
+# ==========================================
+# CCTV CREATE MODEL
+# ==========================================
+
+class CameraCreateRequest(BaseModel):
+
+    camera_code: str
+    camera_name: str
+    ip_address: str
+    location: str | None = None
+
+    monitoring_enabled: bool = True
+
+    # Normal CCTV check interval
+    # Default = 30 minutes
+    monitoring_interval: int = 1800
+
+    # Offline camera retry interval
+    # Default = 2 minutes
+    offline_retry_interval: int = 120
+
+# ==========================================
+# NETWORK MONITORING SETTINGS MODEL
+# ==========================================
+
+class NetworkMonitoringSettingsRequest(BaseModel):
+    enabled: bool
+    interval: int
+
+# ==========================================
+# DESKTOP MONITORING SETTINGS MODEL
+# ==========================================
+
+class DesktopMonitoringSettingsRequest(BaseModel):
+    enabled: bool
+    selected_location: str | None = None
+    interval: int | None = None
+
+    # ==========================================
+# GET NETWORK MONITORING SETTINGS
+# ==========================================
+
+@app.get("/api/settings/network")
+def get_network_monitoring_settings(
+    admin=Depends(get_current_admin)
+):
+
+    db = get_db_connection()
+    cursor = None
+
+    try:
+
+        cursor = db.cursor(dictionary=True)
+
+        cursor.execute(
+            """
+            SELECT
+                COUNT(*) AS total_devices,
+                SUM(
+                    CASE
+                        WHEN monitoring_enabled = 1
+                        THEN 1
+                        ELSE 0
+                    END
+                ) AS enabled_devices,
+                MIN(monitoring_interval) AS monitoring_interval
+            FROM devices
+            """
+        )
+
+        result = cursor.fetchone()
+
+        total_devices = int(
+            result["total_devices"] or 0
+        )
+
+        enabled_devices = int(
+            result["enabled_devices"] or 0
+        )
+
+        interval = int(
+            result["monitoring_interval"] or 60
+        )
+
+        enabled = (
+            total_devices > 0
+            and enabled_devices == total_devices
+        )
+
+        return {
+            "success": True,
+            "enabled": enabled,
+            "interval": interval
+        }
+
+    except Exception as error:
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(error)
+        )
+
+    finally:
+
+        if cursor:
+            cursor.close()
+
+        db.close()
+
+
+# ==========================================
+# UPDATE NETWORK MONITORING SETTINGS
+# ==========================================
+
+@app.put("/api/settings/network")
+def update_network_monitoring_settings(
+    data: NetworkMonitoringSettingsRequest,
+    admin=Depends(get_current_admin)
+):
+
+    if data.interval <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Network monitoring interval must be greater than 0."
+        )
+
+    db = get_db_connection()
+    cursor = None
+
+    try:
+
+        cursor = db.cursor()
+
+        cursor.execute(
+            """
+            UPDATE devices
+            SET
+                monitoring_enabled = %s,
+                monitoring_interval = %s
+            """,
+            (
+                1 if data.enabled else 0,
+                data.interval
+            )
+        )
+
+        cursor.execute(
+            """
+            UPDATE desktops
+            SET
+                monitoring_interval = %s
+            """,
+            (data.interval,)
+        )
+
+        db.commit()
+
+        return {
+            "success": True,
+            "message": "Network monitoring settings updated successfully.",
+            "enabled": data.enabled,
+            "interval": data.interval
+        }
+
+    except Exception as error:
+
+        db.rollback()
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(error)
+        )
+
+    finally:
+
+        if cursor:
+            cursor.close()
+
+        db.close()
+
+
+# ==========================================
+# DESKTOP MONITORING SETTINGS - GET
+# ==========================================
+
+@app.get("/api/desktops/monitoring")
+def get_desktop_monitoring_settings(
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    get_admin_from_token(credentials.credentials)
+
+    conn = get_db_connection()
+
+    if conn is None:
+        raise HTTPException(
+            status_code=500,
+            detail="Database connection failed."
+        )
+
+    cursor = conn.cursor(dictionary=True)
+
+    try:
+        cursor.execute("""
+            SELECT enabled, selected_location
+            FROM desktop_monitoring_settings
+            WHERE id = 1
+            LIMIT 1
+        """)
+
+        settings = cursor.fetchone()
+
+        if settings is None:
+            cursor.execute("""
+                INSERT INTO desktop_monitoring_settings
+                    (id, enabled, selected_location)
+                VALUES
+                    (1, 0, NULL)
+            """)
+
+            conn.commit()
+
+            settings = {
+                "enabled": 0,
+                "selected_location": None
+            }
+
+        cursor.execute("SELECT COALESCE(MIN(monitoring_interval), 30) AS desk_interval FROM desktops")
+        int_row = cursor.fetchone()
+        desk_interval = int(int_row["desk_interval"] or 30) if int_row else 30
+
+        return {
+            "success": True,
+            "enabled": bool(settings["enabled"]),
+            "selected_location": settings["selected_location"],
+            "interval": desk_interval
+        }
+
+    finally:
+        cursor.close()
+        conn.close()
+
+
+# ==========================================
+# DESKTOP MONITORING SETTINGS - UPDATE
+# ==========================================
+
+@app.put("/api/desktops/monitoring")
+def update_desktop_monitoring_settings(
+    request: DesktopMonitoringSettingsRequest,
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    get_admin_from_token(credentials.credentials)
+
+    conn = get_db_connection()
+
+    if conn is None:
+        raise HTTPException(
+            status_code=500,
+            detail="Database connection failed."
+        )
+
+    cursor = conn.cursor(dictionary=True)
+
+    try:
+
+        selected_location = (
+            request.selected_location.strip()
+            if request.selected_location
+            else None
+        )
+
+        # ======================================
+        # MONITORING ON
+        # ======================================
+
+        if request.enabled:
+
+            if not selected_location or selected_location.strip().lower() in ('all', '', 'none', 'all locations'):
+                # Enable ALL desktops
+                cursor.execute("""
+                    UPDATE desktops
+                    SET monitoring_enabled = 1
+                """)
+                selected_location = "All Locations"
+            else:
+                # First disable monitoring for ALL desktops
+                cursor.execute("""
+                    UPDATE desktops
+                    SET monitoring_enabled = 0
+                """)
+
+                # Enable ONLY selected location
+                cursor.execute("""
+                    UPDATE desktops
+                    SET monitoring_enabled = 1
+                    WHERE LOWER(TRIM(location)) = LOWER(TRIM(%s))
+                """, (selected_location,))
+
+        # ======================================
+        # MONITORING OFF
+        # ======================================
+
+        else:
+
+            selected_location = None
+
+            # Stop monitoring every desktop
+            cursor.execute("""
+                UPDATE desktops
+                SET monitoring_enabled = 0
+            """)
+
+        # ======================================
+        # UPDATE INTERVAL IF PROVIDED
+        # ======================================
+        if request.interval and request.interval > 0:
+            cursor.execute("""
+                UPDATE desktops
+                SET monitoring_interval = %s
+            """, (request.interval,))
+
+        # ======================================
+        # SAVE MASTER MONITORING STATE
+        # ======================================
+
+        cursor.execute("""
+            INSERT INTO desktop_monitoring_settings
+                (id, enabled, selected_location)
+            VALUES
+                (1, %s, %s)
+            ON DUPLICATE KEY UPDATE
+                enabled = VALUES(enabled),
+                selected_location = VALUES(selected_location)
+        """, (
+            1 if request.enabled else 0,
+            selected_location
+        ))
+
+        conn.commit()
+
+        return {
+            "success": True,
+            "message": (
+                "Desktop monitoring enabled."
+                if request.enabled
+                else "Desktop monitoring disabled."
+            ),
+            "enabled": bool(request.enabled),
+            "selected_location": selected_location,
+            "interval": request.interval
+        }
+
+    except HTTPException:
+        conn.rollback()
+        raise
+
+    except Exception as error:
+        conn.rollback()
+
+        raise HTTPException(
+            status_code=500,
+            detail=f"Desktop monitoring update failed: {str(error)}"
+        )
+
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.put("/api/desktops/{desktop_id}")
+def update_desktop(
+    desktop_id: int,
+    data: DesktopUpdateRequest,
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    token = credentials.credentials
+    get_admin_from_token(token)
+
+    db = get_db_connection()
+    cursor = None
+
+    try:
+        cursor = db.cursor(dictionary=True)
+
+        # ------------------------------------------
+        # CHECK DESKTOP
+        # ------------------------------------------
+
+        cursor.execute(
+            """
+            SELECT id, desktop_code, department, status
+            FROM desktops
+            WHERE id = %s
+            LIMIT 1
+            """,
+            (desktop_id,)
+        )
+
+        existing = cursor.fetchone()
+
+        if not existing:
+            raise HTTPException(
+                status_code=404,
+                detail="Desktop not found."
+            )
+
+        # ------------------------------------------
+        # UPDATE ONLY PROVIDED FIELDS
+        # ------------------------------------------
+
+        fields = []
+        values = []
+
+        update_data = data.model_dump(exclude_unset=True)
+
+        if "desktop_code" in update_data:
+            fields.append("desktop_code = %s")
+            values.append(update_data["desktop_code"])
+
+        if "department" in update_data:
+            fields.append("department = %s")
+            values.append(update_data["department"])
+
+        if "location" in update_data:
+            fields.append("location = %s")
+            values.append(update_data["location"])
+
+        if "ip_address" in update_data:
+            fields.append("ip_address = %s")
+            values.append(update_data["ip_address"])
+
+        if "operating_system" in update_data:
+            fields.append("operating_system = %s")
+            values.append(update_data["operating_system"])
+
+        if "cpu_usage" in update_data:
+            fields.append("cpu_usage = %s")
+            values.append(update_data["cpu_usage"])
+
+        if "ram_usage" in update_data:
+            fields.append("ram_usage = %s")
+            values.append(update_data["ram_usage"])
+
+        if "status" in update_data:
+            fields.append("status = %s")
+            values.append(update_data["status"])
+
+        if "monitoring_enabled" in update_data:
+            fields.append("monitoring_enabled = %s")
+            values.append(
+                1 if update_data["monitoring_enabled"] else 0
+            )
+
+        if "monitoring_interval" in update_data:
+            fields.append("monitoring_interval = %s")
+            values.append(update_data["monitoring_interval"])
+
+        if not fields:
+            raise HTTPException(
+                status_code=400,
+                detail="No fields provided for update."
+            )
+
+        # ------------------------------------------
+        # UPDATE MYSQL
+        # ------------------------------------------
+
+        values.append(desktop_id)
+
+        query = f"""
+            UPDATE desktops
+            SET {", ".join(fields)}
+            WHERE id = %s
+        """
+
+        cursor.execute(query, tuple(values))
+
+        if "status" in update_data and existing.get("status") and existing.get("status") != update_data["status"]:
+            record_status_change_alert(None, cursor, "Desktop", existing["desktop_code"], existing.get("department", "Desktop"), existing.get("status"), update_data["status"])
+
+        db.commit()
+
+        # ------------------------------------------
+        # LOAD UPDATED DESKTOP
+        # ------------------------------------------
+
+        cursor.execute(
+            """
+            SELECT
+                id,
+                desktop_code,
+                department,
+                location,
+                ip_address,
+                operating_system,
+                cpu_usage,
+                ram_usage,
+                status,
+                monitoring_enabled,
+                monitoring_interval,
+                last_check,
+                last_latency_ms,
+                total_checks,
+                successful_checks,
+                uptime_percent,
+                created_at,
+                updated_at
+            FROM desktops
+            WHERE id = %s
+            LIMIT 1
+            """,
+            (desktop_id,)
+        )
+
+        desktop = cursor.fetchone()
+
+        return {
+            "success": True,
+            "message": "Desktop updated successfully.",
+            "desktop": desktop
+        }
+
+    except HTTPException:
+        db.rollback()
+        raise
+
+    except Exception as error:
+        db.rollback()
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(error)
+        )
+
+    finally:
+
+        if cursor:
+            cursor.close()
+
+        db.close()
+
+
+# ==========================================
+# DESKTOP PING API
+# ==========================================
+
+@app.post("/api/desktops/{desktop_id}/ping")
+def ping_desktop(
+    desktop_id: int,
+    admin=Depends(get_current_admin)
+):
+    db = get_db_connection()
+    cursor = None
+
+    try:
+        cursor = db.cursor(dictionary=True)
+
+        cursor.execute(
+            """
+            SELECT
+                id,
+                desktop_code,
+                department,
+                location,
+                ip_address,
+                status,
+                last_latency_ms,
+                total_checks,
+                successful_checks,
+                uptime_percent
+            FROM desktops
+            WHERE id = %s
+            LIMIT 1
+            """,
+            (desktop_id,)
+        )
+
+        desktop = cursor.fetchone()
+
+        if not desktop:
+            raise HTTPException(
+                status_code=404,
+                detail="Desktop not found."
+            )
+
+        ip_address = desktop.get("ip_address")
+        ping_success, latency = execute_network_ping(ip_address, timeout_sec=1.0)
+
+        if ping_success is None:
+            # Cloud environment querying private IP: use Plant LAN monitor status and update counters
+            status = desktop.get("status") or "Unknown"
+            latency = float(desktop["last_latency_ms"]) if (desktop.get("last_latency_ms") is not None and status == "Online") else None
+            now = datetime.now()
+            total_checks = int(desktop.get("total_checks") or 0) + 1
+            successful_checks = int(desktop.get("successful_checks") or 0) + (1 if status == "Online" else 0)
+            uptime_percent = round((successful_checks / total_checks) * 100, 2)
+            cursor.execute("""
+                UPDATE desktops
+                SET status = %s, last_check = %s, last_latency_ms = %s, total_checks = %s, successful_checks = %s, uptime_percent = %s, updated_at = %s
+                WHERE id = %s
+            """, (status, now, latency, total_checks, successful_checks, uptime_percent, now, desktop_id))
+            db.commit()
+            return {
+                "success": True,
+                "desktop_id": desktop["id"],
+                "desktop_code": desktop["desktop_code"],
+                "ip_address": ip_address,
+                "status": status,
+                "latency_ms": latency,
+                "total_checks": total_checks,
+                "successful_checks": successful_checks,
+                "uptime_percent": uptime_percent,
+                "last_check": now.isoformat(),
+                "message": f"Desktop is {status} (Plant LAN Monitor)"
+            }
+
+        status = "Online" if ping_success else "Offline"
+        now = datetime.now()
+
+        total_checks = int(desktop.get("total_checks") or 0) + 1
+        successful_checks = int(desktop.get("successful_checks") or 0) + (1 if ping_success else 0)
+        uptime_percent = round((successful_checks / total_checks) * 100, 2)
+
+        cursor.execute(
+            """
+            UPDATE desktops
+            SET
+                status = %s,
+                last_check = %s,
+                last_latency_ms = %s,
+                total_checks = %s,
+                successful_checks = %s,
+                uptime_percent = %s,
+                updated_at = %s
+            WHERE id = %s
+            """,
+            (
+                status,
+                now,
+                latency,
+                total_checks,
+                successful_checks,
+                uptime_percent,
+                now,
+                desktop_id
+            )
+        )
+
+        old_status = desktop.get("status")
+        if old_status and old_status != status:
+            record_status_change_alert(None, cursor, "Desktop", desktop["desktop_code"], desktop.get("department", "Desktop"), old_status, status)
+
+        db.commit()
+
+        return {
+            "success": True,
+            "desktop_id": desktop["id"],
+            "desktop_code": desktop["desktop_code"],
+            "ip_address": ip_address,
+            "status": status,
+            "latency_ms": latency,
+            "total_checks": total_checks,
+            "successful_checks": successful_checks,
+            "uptime_percent": uptime_percent,
+            "last_check": now.isoformat(),
+            "message": "Desktop ping successful" if ping_success else "Desktop offline or unreachable"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as error:
+        if db:
+            db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=str(error)
+        )
+    finally:
+        if cursor:
+            cursor.close()
+        if db:
+            db.close()
+
+
+# ==========================================
+# DESKTOP - TOGGLE STATUS & UPDATE
+# ==========================================
+
+@app.put("/api/desktops/{desktop_id}/toggle-status")
+def toggle_desktop_status(
+    desktop_id: int,
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    token = credentials.credentials
+    admin = get_admin_from_token(token)
+    if admin is None:
+        raise HTTPException(status_code=401, detail="Invalid or expired token.")
+    db = get_db_connection()
+    if not db:
+        raise HTTPException(status_code=500, detail="Database connection failed")
+    cursor = None
+    try:
+        cursor = db.cursor(dictionary=True)
+        cursor.execute("SELECT id, desktop_code, department, status FROM desktops WHERE id = %s LIMIT 1", (desktop_id,))
+        desktop = cursor.fetchone()
+        if not desktop:
+            raise HTTPException(status_code=404, detail="Desktop not found")
+        old_status = desktop.get("status") or "Online"
+        new_status = "Offline" if old_status == "Online" else "Online"
+        now = datetime.now()
+        cursor.execute("UPDATE desktops SET status = %s, updated_at = %s WHERE id = %s", (new_status, now, desktop_id))
+        msg = record_status_change_alert(db, cursor, "Desktop", desktop["desktop_code"], desktop.get("department", "Desktop"), old_status, new_status)
+        db.commit()
+        return {
+            "success": True,
+            "desktop_id": desktop_id,
+            "desktop_code": desktop["desktop_code"],
+            "department": desktop.get("department", "Desktop"),
+            "old_status": old_status,
+            "status": new_status,
+            "message": msg or f"Desktop {desktop['desktop_code']} is now {new_status}"
+        }
+    finally:
+        if cursor:
+            cursor.close()
+        if db:
+            db.close()
+
+
+# ==========================================
+# DESKTOPS - PING ALL DESKTOPS BATCH
+# ==========================================
+
+@app.post("/api/desktops/ping-all")
+def ping_all_desktops_endpoint(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    token = credentials.credentials
+    admin = get_admin_from_token(token)
+    if admin is None:
+        raise HTTPException(status_code=401, detail="Invalid or expired token.")
+
+    db = get_db_connection()
+    if not db:
+        raise HTTPException(status_code=500, detail="Database connection failed")
+    cursor = None
+    try:
+        cursor = db.cursor(dictionary=True)
+        cursor.execute("SELECT id, desktop_code, department, location, ip_address, status, last_latency_ms, total_checks, successful_checks FROM desktops WHERE monitoring_enabled = 1")
+        desktops = cursor.fetchall()
+        cursor.close()
+        db.close()
+        db = None
+        cursor = None
+
+        def _ping_single_desk(desk):
+            ip = desk.get("ip_address")
+            success, lat = execute_network_ping(ip, timeout_sec=0.8)
+            now = datetime.now()
+            if success is None:
+                st = desk.get("status") or "Unknown"
+                lat = float(desk["last_latency_ms"]) if (desk.get("last_latency_ms") is not None and st == "Online") else None
+            else:
+                st = "Online" if success else "Offline"
+            tot = int(desk.get("total_checks") or 0) + 1
+            suc = int(desk.get("successful_checks") or 0) + (1 if st == "Online" else 0)
+            upt = round((suc / tot) * 100, 2)
+            return {
+                "id": desk["id"],
+                "status": st,
+                "latency_ms": lat,
+                "total_checks": tot,
+                "successful_checks": suc,
+                "uptime_percent": upt,
+                "last_check": now
+            }
+
+        results = []
+        if desktops:
+            with ThreadPoolExecutor(max_workers=min(20, len(desktops))) as executor:
+                futures = [executor.submit(_ping_single_desk, d) for d in desktops]
+                for fut in as_completed(futures):
+                    try:
+                        results.append(fut.result())
+                    except Exception:
+                        pass
+
+        if results:
+            db_w = get_db_connection()
+            if db_w:
+                cur_w = db_w.cursor()
+                desk_map = {dk["id"]: dk for dk in desktops}
+                for r in results:
+                    cur_w.execute("""
+                        UPDATE desktops
+                        SET status = %s, last_latency_ms = %s, last_check = %s, total_checks = %s, successful_checks = %s, uptime_percent = %s, updated_at = %s
+                        WHERE id = %s
+                    """, (r["status"], r["latency_ms"], r["last_check"], r["total_checks"], r["successful_checks"], r["uptime_percent"], r["last_check"], r["id"]))
+                    old_dk = desk_map.get(r["id"])
+                    old_st = old_dk.get("status") if old_dk else None
+                    if old_st and old_st != r["status"]:
+                        record_status_change_alert(None, cur_w, "Desktop", old_dk["desktop_code"], old_dk.get("department", "Desktop"), old_st, r["status"])
+                db_w.commit()
+                cur_w.close()
+                db_w.close()
+
+        db_r = get_db_connection()
+        if db_r:
+            cur_r = db_r.cursor(dictionary=True)
+            cur_r.execute("SELECT * FROM desktops ORDER BY id")
+            all_desktops = cur_r.fetchall()
+            cur_r.close()
+            db_r.close()
+            return {"success": True, "count": len(all_desktops), "desktops": all_desktops}
+        return {"success": True, "count": 0, "desktops": []}
+    except Exception as err:
+        raise HTTPException(status_code=500, detail=str(err))
+    finally:
+        if cursor:
+            try: cursor.close()
+            except Exception: pass
+        if db:
+            try: db.close()
+            except Exception: pass
+
+
+# ==========================================
+# CREATE DEVICE
+# ==========================================
+
+@app.post("/api/devices")
+def create_device(
+    data: DeviceCreateRequest,
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    token = credentials.credentials
+
+    # ------------------------------------------
+    # VERIFY LOGGED-IN ADMIN
+    # ------------------------------------------
+
+    admin = get_admin_from_token(token)
+
+    if admin is None:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or expired token."
+        )
+
+    # ------------------------------------------
+    # CLEAN INPUT VALUES
+    # ------------------------------------------
+
+    device_code = data.device_code.strip()
+    device_name = data.device_name.strip()
+    device_type = data.device_type.strip()
+    ip_address = data.ip_address.strip()
+
+    mac_address = (
+        data.mac_address.strip()
+        if data.mac_address
+        else None
+    )
+
+    location = (
+        data.location.strip()
+        if data.location
+        else None
+    )
+
+    description = (
+        data.description.strip()
+        if data.description
+        else None
+    )
+
+    # ------------------------------------------
+    # REQUIRED FIELD VALIDATION
+    # ------------------------------------------
+
+    if not device_code:
+        raise HTTPException(
+            status_code=400,
+            detail="Device code is required."
+        )
+
+    if not device_name:
+        raise HTTPException(
+            status_code=400,
+            detail="Device name is required."
+        )
+
+    if not device_type:
+        raise HTTPException(
+            status_code=400,
+            detail="Device type is required."
+        )
+
+    if not ip_address:
+        raise HTTPException(
+            status_code=400,
+            detail="IP address is required."
+        )
+
+    # ------------------------------------------
+    # MONITORING INTERVAL VALIDATION
+    # ------------------------------------------
+
+    if data.monitoring_interval <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Monitoring interval must be greater than 0."
+        )
+
+    # ------------------------------------------
+    # DATABASE CONNECTION
+    # ------------------------------------------
+
+    connection = get_db_connection()
+
+    if connection is None:
+        raise HTTPException(
+            status_code=500,
+            detail="Database connection failed."
+        )
+
+    cursor = None
+
+    try:
+
+        cursor = connection.cursor(dictionary=True)
+
+        # ------------------------------------------
+        # CHECK DUPLICATE DEVICE CODE
+        # ------------------------------------------
+
+        cursor.execute(
+            """
+            SELECT id
+            FROM devices
+            WHERE device_code = %s
+            LIMIT 1
+            """,
+            (device_code,)
+        )
+
+        existing_code = cursor.fetchone()
+
+        if existing_code:
+            raise HTTPException(
+                status_code=400,
+                detail="Device code already exists."
+            )
+
+        # ------------------------------------------
+        # CHECK DUPLICATE IP
+        # ------------------------------------------
+
+        cursor.execute(
+            """
+            SELECT id, device_code
+            FROM devices
+            WHERE ip_address = %s
+            LIMIT 1
+            """,
+            (ip_address,)
+        )
+
+        existing_ip = cursor.fetchone()
+
+        if existing_ip:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"IP address already belongs to device "
+                    f"{existing_ip['device_code']}."
+                )
+            )
+
+        # ------------------------------------------
+        # INSERT DEVICE
+        # ------------------------------------------
+
+        cursor.execute(
+            """
+            INSERT INTO devices (
+                device_code,
+                device_name,
+                device_type,
+                ip_address,
+                mac_address,
+                location,
+                description,
+                status,
+                monitoring_enabled,
+                monitoring_interval
+            )
+            VALUES (
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                %s
+            )
+            """,
+            (
+                device_code,
+                device_name,
+                device_type,
+                ip_address,
+                mac_address,
+                location,
+                description,
+                "Unknown",
+                1 if data.monitoring_enabled else 0,
+                data.monitoring_interval
+            )
+        )
+
+        # ------------------------------------------
+        # GET NEW DEVICE ID
+        # ------------------------------------------
+
+        device_id = cursor.lastrowid
+
+        if not device_id:
+            connection.rollback()
+
+            raise HTTPException(
+                status_code=500,
+                detail="Device ID could not be generated."
+            )
+
+        # ------------------------------------------
+        # SAVE TO MYSQL
+        # ------------------------------------------
+
+        connection.commit()
+
+        # ------------------------------------------
+        # GET CREATED DEVICE
+        # ------------------------------------------
+
+        cursor.execute(
+            """
+            SELECT
+                id,
+                device_code,
+                device_name,
+                device_type,
+                ip_address,
+                mac_address,
+                location,
+                description,
+                status,
+                monitoring_enabled,
+                monitoring_interval,
+                last_check,
+                last_latency_ms,
+                uptime_percent,
+                created_at,
+                updated_at
+            FROM devices
+            WHERE id = %s
+            LIMIT 1
+            """,
+            (device_id,)
+        )
+
+        device = cursor.fetchone()
+
+        if not device:
+            raise HTTPException(
+                status_code=500,
+                detail="Device was inserted but could not be loaded."
+            )
+
+        # ------------------------------------------
+        # SUCCESS RESPONSE
+        # ------------------------------------------
+
+        return {
+            "success": True,
+            "message": "Device created successfully.",
+            "device": device
+        }
+
+    except HTTPException:
+        connection.rollback()
+        raise
+
+    except Exception as error:
+        connection.rollback()
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(error)
+        )
+
+    finally:
+
+        if cursor:
+            cursor.close()
+
+        connection.close()
+
+
+
+        # ==========================================
+# DEVICE PING
+# ==========================================
+
+
+# ==========================================
+# DEVICE PING
+# ==========================================
+
+@app.post("/api/devices/{device_id}/ping")
+def ping_device(
+    device_id: int,
+    admin=Depends(get_current_admin)
+):
+    db = get_db_connection()
+    cursor = None
+
+    try:
+        cursor = db.cursor(dictionary=True)
+
+        # ------------------------------------------
+        # GET DEVICE
+        # ------------------------------------------
+
+        cursor.execute(
+            """
+            SELECT
+                id,
+                device_code,
+                device_name,
+                ip_address,
+                status,
+                last_latency_ms,
+                total_checks,
+                successful_checks,
+                uptime_percent
+            FROM devices
+            WHERE id = %s
+            LIMIT 1
+            """,
+            (device_id,)
+        )
+
+        device = cursor.fetchone()
+
+        if not device:
+            raise HTTPException(
+                status_code=404,
+                detail="Device not found"
+            )
+
+        ip_address = device["ip_address"]
+
+        # EXECUTE RESILIENT PING
+        ping_success, latency = execute_network_ping(ip_address, timeout_sec=1.0)
+
+        if ping_success is None:
+            # Cloud environment querying private IP: use Plant LAN monitor status and update counters
+            status = device.get("status") or "Unknown"
+            latency = float(device["last_latency_ms"]) if (device.get("last_latency_ms") is not None and status == "Online") else None
+            now = datetime.now()
+            total_checks = int(device.get("total_checks") or 0) + 1
+            successful_checks = int(device.get("successful_checks") or 0) + (1 if status == "Online" else 0)
+            uptime_percent = round((successful_checks / total_checks) * 100, 2)
+            cursor.execute("""
+                UPDATE devices
+                SET status = %s, last_check = %s, last_latency_ms = %s, total_checks = %s, successful_checks = %s, uptime_percent = %s, updated_at = %s
+                WHERE id = %s
+            """, (status, now, latency, total_checks, successful_checks, uptime_percent, now, device_id))
+            db.commit()
+            return {
+                "success": True,
+                "device_id": device["id"],
+                "device_code": device["device_code"],
+                "device_name": device["device_name"],
+                "ip_address": ip_address,
+                "status": status,
+                "latency_ms": latency,
+                "total_checks": total_checks,
+                "successful_checks": successful_checks,
+                "uptime_percent": uptime_percent,
+                "last_check": now.isoformat(),
+                "message": f"{device['device_name']} is {status} (Plant LAN Monitor)"
+            }
+
+        status = "Online" if ping_success else "Offline"
+        now = datetime.now()
+
+        total_checks = int(device["total_checks"] or 0) + 1
+        successful_checks = int(device["successful_checks"] or 0) + (1 if ping_success else 0)
+        uptime_percent = round((successful_checks / total_checks) * 100, 2)
+
+        cursor.execute(
+            """
+            UPDATE devices
+            SET
+                status = %s,
+                last_check = %s,
+                last_latency_ms = %s,
+                total_checks = %s,
+                successful_checks = %s,
+                uptime_percent = %s,
+                updated_at = %s
+            WHERE id = %s
+            """,
+            (
+                status,
+                now,
+                latency,
+                total_checks,
+                successful_checks,
+                uptime_percent,
+                now,
+                device_id
+            )
+        )
+
+        old_status = device.get("status")
+        if old_status and old_status != status:
+            record_status_change_alert(None, cursor, "Device", device["device_code"], device["device_name"], old_status, status)
+
+        db.commit()
+
+        return {
+            "success": True,
+            "device_id": device["id"],
+            "device_code": device["device_code"],
+            "device_name": device["device_name"],
+            "ip_address": ip_address,
+            "status": status,
+            "latency_ms": latency,
+            "total_checks": total_checks,
+            "successful_checks": successful_checks,
+            "uptime_percent": uptime_percent,
+            "last_check": now.isoformat(),
+            "message": (
+                "Ping successful"
+                if ping_success
+                else "Ping failed (Host offline or unreachable)"
+            )
+        }
+
+    except HTTPException:
+        raise
+
+    except Exception as error:
+        if db:
+            db.rollback()
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(error)
+        )
+
+    finally:
+
+        if cursor:
+            cursor.close()
+
+        db.close()
+
+
+# ==========================================
+# DEVICE - TOGGLE STATUS
+# ==========================================
+
+@app.put("/api/devices/{device_id}/toggle-status")
+def toggle_device_status(
+    device_id: int,
+    admin=Depends(get_current_admin)
+):
+    db = get_db_connection()
+    if not db:
+        raise HTTPException(status_code=500, detail="Database connection failed")
+    cursor = None
+    try:
+        cursor = db.cursor(dictionary=True)
+        cursor.execute("SELECT id, device_code, device_name, status FROM devices WHERE id = %s LIMIT 1", (device_id,))
+        device = cursor.fetchone()
+        if not device:
+            raise HTTPException(status_code=404, detail="Device not found")
+        old_status = device.get("status") or "Online"
+        new_status = "Offline" if old_status == "Online" else "Online"
+        now = datetime.now()
+        cursor.execute("UPDATE devices SET status = %s, updated_at = %s WHERE id = %s", (new_status, now, device_id))
+        msg = record_status_change_alert(db, cursor, "Device", device["device_code"], device["device_name"], old_status, new_status)
+        db.commit()
+        return {
+            "success": True,
+            "device_id": device_id,
+            "device_code": device["device_code"],
+            "device_name": device["device_name"],
+            "old_status": old_status,
+            "status": new_status,
+            "message": msg or f"Device {device['device_code']} is now {new_status}"
+        }
+    finally:
+        if cursor:
+            cursor.close()
+        db.close()
+
+
+@app.post("/api/devices/ping-all")
+def ping_all_devices_endpoint(admin=Depends(get_current_admin)):
+    db = get_db_connection()
+    if not db:
+        raise HTTPException(status_code=500, detail="Database connection failed")
+    cursor = None
+    try:
+        cursor = db.cursor(dictionary=True)
+        cursor.execute("SELECT id, device_code, device_name, ip_address, status, last_latency_ms, total_checks, successful_checks FROM devices WHERE monitoring_enabled = 1")
+        devices = cursor.fetchall()
+        cursor.close()
+        db.close()
+        db = None
+        cursor = None
+
+        def _ping_single_dev(dev):
+            ip = dev.get("ip_address")
+            success, lat = execute_network_ping(ip, timeout_sec=0.8)
+            now = datetime.now()
+            if success is None:
+                st = dev.get("status") or "Unknown"
+                lat = float(dev["last_latency_ms"]) if (dev.get("last_latency_ms") is not None and st == "Online") else None
+            else:
+                st = "Online" if success else "Offline"
+            tot = int(dev.get("total_checks") or 0) + 1
+            suc = int(dev.get("successful_checks") or 0) + (1 if st == "Online" else 0)
+            upt = round((suc / tot) * 100, 2)
+            return {
+                "id": dev["id"],
+                "status": st,
+                "latency_ms": lat,
+                "total_checks": tot,
+                "successful_checks": suc,
+                "uptime_percent": upt,
+                "last_check": now
+            }
+
+        results = []
+        if devices:
+            with ThreadPoolExecutor(max_workers=min(20, len(devices))) as executor:
+                futures = [executor.submit(_ping_single_dev, d) for d in devices]
+                for fut in as_completed(futures):
+                    try:
+                        results.append(fut.result())
+                    except Exception:
+                        pass
+
+        if results:
+            db_w = get_db_connection()
+            if db_w:
+                cur_w = db_w.cursor()
+                dev_map = {d["id"]: d for d in devices}
+                update_params = [
+                    (r["status"], r["latency_ms"], r["last_check"], r["total_checks"], r["successful_checks"], r["uptime_percent"], r["last_check"], r["id"])
+                    for r in results
+                ]
+                cur_w.executemany("""
+                    UPDATE devices
+                    SET status = %s, last_latency_ms = %s, last_check = %s, total_checks = %s, successful_checks = %s, uptime_percent = %s, updated_at = %s
+                    WHERE id = %s
+                """, update_params)
+                for r in results:
+                    old_d = dev_map.get(r["id"])
+                    old_st = old_d.get("status") if old_d else None
+                    if old_st and old_st != r["status"]:
+                        record_status_change_alert(None, cur_w, "Device", old_d["device_code"], old_d["device_name"], old_st, r["status"])
+                db_w.commit()
+                cur_w.close()
+                db_w.close()
+
+        db_r = get_db_connection()
+        if db_r:
+            cur_r = db_r.cursor(dictionary=True)
+            cur_r.execute("SELECT * FROM devices ORDER BY id")
+            all_devices = cur_r.fetchall()
+            cur_r.close()
+            db_r.close()
+            return {"success": True, "devices": all_devices}
+        return {"success": True, "devices": []}
+    except Exception as err:
+        raise HTTPException(status_code=500, detail=str(err))
+    finally:
+        if cursor:
+            try: cursor.close()
+            except Exception: pass
+        if db:
+            try: db.close()
+            except Exception: pass
+
+
+# ==========================================
+# CCTV - GET ALL CAMERAS
+# ==========================================
+
+@app.get("/api/cameras")
+def get_cameras(
+    admin=Depends(get_current_admin)
+):
+
+    db = get_db_connection()
+    cursor = None
+
+    try:
+
+        cursor = db.cursor(dictionary=True)
+
+        cursor.execute(
+            """
+            SELECT
+                id,
+                camera_code,
+                camera_name,
+                ip_address,
+                location,
+                status,
+                monitoring_enabled,
+                monitoring_interval,
+                offline_retry_interval,
+                last_check,
+                last_latency_ms,
+                total_checks,
+                successful_checks,
+                uptime_percent,
+                created_at,
+                updated_at
+            FROM cameras
+            ORDER BY id DESC
+            """
+        )
+
+        cameras = cursor.fetchall()
+
+        return {
+            "success": True,
+            "count": len(cameras),
+            "cameras": cameras
+        }
+
+    except Exception as error:
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(error)
+        )
+
+    finally:
+
+        if cursor:
+            cursor.close()
+
+        db.close()
+
+
+# ==========================================
+# CCTV - CREATE CAMERA
+# ==========================================
+
+@app.post("/api/cameras")
+def create_camera(
+    data: CameraCreateRequest,
+    admin=Depends(get_current_admin)
+):
+
+    camera_code = data.camera_code.strip()
+    camera_name = data.camera_name.strip()
+    ip_address = data.ip_address.strip()
+    location = (
+        data.location.strip()
+        if data.location
+        else None
+    )
+
+    if not camera_code:
+        raise HTTPException(
+            status_code=400,
+            detail="Camera code is required."
+        )
+
+    if not camera_name:
+        raise HTTPException(
+            status_code=400,
+            detail="Camera name is required."
+        )
+
+    if not ip_address:
+        raise HTTPException(
+            status_code=400,
+            detail="IP address is required."
+        )
+
+    if data.monitoring_interval <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Monitoring interval must be greater than 0."
+        )
+
+    if data.offline_retry_interval <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Offline retry interval must be greater than 0."
+        )
+
+    db = get_db_connection()
+    cursor = None
+
+    try:
+
+        cursor = db.cursor(dictionary=True)
+
+        # --------------------------------------
+        # DUPLICATE CAMERA CODE
+        # --------------------------------------
+
+        cursor.execute(
+            """
+            SELECT id
+            FROM cameras
+            WHERE camera_code = %s
+            LIMIT 1
+            """,
+            (camera_code,)
+        )
+
+        existing_code = cursor.fetchone()
+
+        if existing_code:
+
+            raise HTTPException(
+                status_code=400,
+                detail="Camera code already exists."
+            )
+
+        # --------------------------------------
+        # DUPLICATE IP
+        # --------------------------------------
+
+        cursor.execute(
+            """
+            SELECT
+                id,
+                camera_code
+            FROM cameras
+            WHERE ip_address = %s
+            LIMIT 1
+            """,
+            (ip_address,)
+        )
+
+        existing_ip = cursor.fetchone()
+
+        if existing_ip:
+
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"IP address already belongs to "
+                    f"camera {existing_ip['camera_code']}."
+                )
+            )
+
+        # --------------------------------------
+        # INSERT CAMERA
+        # --------------------------------------
+
+        cursor.execute(
+            """
+            INSERT INTO cameras (
+                camera_code,
+                camera_name,
+                ip_address,
+                location,
+                status,
+                monitoring_enabled,
+                monitoring_interval,
+                offline_retry_interval
+            )
+            VALUES (
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                %s
+            )
+            """,
+            (
+                camera_code,
+                camera_name,
+                ip_address,
+                location,
+                "Unknown",
+                1 if data.monitoring_enabled else 0,
+                data.monitoring_interval,
+                data.offline_retry_interval
+            )
+        )
+
+        camera_id = cursor.lastrowid
+
+        db.commit()
+
+        # --------------------------------------
+        # LOAD CREATED CAMERA
+        # --------------------------------------
+
+        cursor.execute(
+            """
+            SELECT
+                id,
+                camera_code,
+                camera_name,
+                ip_address,
+                location,
+                status,
+                monitoring_enabled,
+                monitoring_interval,
+                offline_retry_interval,
+                last_check,
+                last_latency_ms,
+                total_checks,
+                successful_checks,
+                uptime_percent,
+                created_at,
+                updated_at
+            FROM cameras
+            WHERE id = %s
+            LIMIT 1
+            """,
+            (camera_id,)
+        )
+
+        camera = cursor.fetchone()
+
+        return {
+            "success": True,
+            "message": "CCTV camera created successfully.",
+            "camera": camera
+        }
+
+    except HTTPException:
+
+        db.rollback()
+        raise
+
+    except Exception as error:
+
+        db.rollback()
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(error)
+        )
+
+    finally:
+
+        if cursor:
+            cursor.close()
+
+        db.close()
+
+# ==========================================
+# CCTV - REAL PING / HEALTH CHECK
+# ==========================================
+
+@app.post("/api/cameras/{camera_id}/ping")
+def ping_camera(
+    camera_id: int,
+    admin=Depends(get_current_admin)
+):
+
+    db = get_db_connection()
+    cursor = None
+
+    try:
+
+        cursor = db.cursor(dictionary=True)
+
+        # --------------------------------------
+        # GET CAMERA
+        # --------------------------------------
+
+        cursor.execute(
+            """
+            SELECT
+                id,
+                camera_code,
+                camera_name,
+                ip_address,
+                status,
+                last_latency_ms,
+                total_checks,
+                successful_checks,
+                uptime_percent
+            FROM cameras
+            WHERE id = %s
+            LIMIT 1
+            """,
+            (camera_id,)
+        )
+
+        camera = cursor.fetchone()
+
+        if not camera:
+
+            raise HTTPException(
+                status_code=404,
+                detail="Camera not found."
+            )
+
+        ip_address = camera["ip_address"]
+
+        # EXECUTE RESILIENT PING
+        ping_success, latency = execute_network_ping(ip_address, timeout_sec=1.0)
+
+        if ping_success is None:
+            # Cloud environment querying private IP: use Plant LAN monitor status and update counters
+            status = camera.get("status") or "Unknown"
+            latency = float(camera["last_latency_ms"]) if (camera.get("last_latency_ms") is not None and status == "Online") else None
+            now = datetime.now()
+            total_checks = int(camera.get("total_checks") or 0) + 1
+            successful_checks = int(camera.get("successful_checks") or 0) + (1 if status == "Online" else 0)
+            uptime_percent = round((successful_checks / total_checks) * 100, 2)
+            cursor.execute("""
+                UPDATE cameras
+                SET status = %s, last_check = %s, last_latency_ms = %s, total_checks = %s, successful_checks = %s, uptime_percent = %s, updated_at = %s
+                WHERE id = %s
+            """, (status, now, latency, total_checks, successful_checks, uptime_percent, now, camera_id))
+            db.commit()
+            return {
+                "success": True,
+                "camera_id": camera["id"],
+                "camera_code": camera["camera_code"],
+                "camera_name": camera["camera_name"],
+                "ip_address": ip_address,
+                "status": status,
+                "latency_ms": latency,
+                "total_checks": total_checks,
+                "successful_checks": successful_checks,
+                "uptime_percent": uptime_percent,
+                "last_check": now.isoformat(),
+                "message": f"Camera is {status} (Plant LAN Monitor)"
+            }
+
+        status = "Online" if ping_success else "Offline"
+        now = datetime.now()
+
+        total_checks = int(camera["total_checks"] or 0) + 1
+        successful_checks = int(camera["successful_checks"] or 0) + (1 if ping_success else 0)
+        uptime_percent = round((successful_checks / total_checks) * 100, 2)
+
+        cursor.execute(
+            """
+            UPDATE cameras
+            SET
+                status = %s,
+                last_check = %s,
+                last_latency_ms = %s,
+                total_checks = %s,
+                successful_checks = %s,
+                uptime_percent = %s,
+                updated_at = %s
+            WHERE id = %s
+            """,
+            (
+                status,
+                now,
+                latency,
+                total_checks,
+                successful_checks,
+                uptime_percent,
+                now,
+                camera_id
+            )
+        )
+
+        old_status = camera.get("status")
+        if old_status and old_status != status:
+            record_status_change_alert(None, cursor, "Camera", camera["camera_code"], camera["camera_name"], old_status, status)
+
+        db.commit()
+
+        return {
+            "success": True,
+            "camera_id": camera["id"],
+            "camera_code": camera["camera_code"],
+            "camera_name": camera["camera_name"],
+            "ip_address": ip_address,
+            "status": status,
+            "latency_ms": latency,
+            "total_checks": total_checks,
+            "successful_checks": successful_checks,
+            "uptime_percent": uptime_percent,
+            "last_check": now.isoformat(),
+            "message": (
+                "Camera ping successful"
+                if ping_success
+                else "Camera ping failed (Host offline or unreachable)"
+            )
+        }
+
+    except HTTPException:
+        raise
+
+    except Exception as error:
+        if db:
+            db.rollback()
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(error)
+        )
+
+    finally:
+
+        if cursor:
+            cursor.close()
+
+        db.close()
+
+
+# ==========================================
+# CAMERA - TOGGLE STATUS
+# ==========================================
+
+@app.put("/api/cameras/{camera_id}/toggle-status")
+def toggle_camera_status(
+    camera_id: int,
+    admin=Depends(get_current_admin)
+):
+    db = get_db_connection()
+    if not db:
+        raise HTTPException(status_code=500, detail="Database connection failed")
+    cursor = None
+    try:
+        cursor = db.cursor(dictionary=True)
+        cursor.execute("SELECT id, camera_code, camera_name, status FROM cameras WHERE id = %s LIMIT 1", (camera_id,))
+        camera = cursor.fetchone()
+        if not camera:
+            raise HTTPException(status_code=404, detail="Camera not found")
+        old_status = camera.get("status") or "Online"
+        new_status = "Offline" if old_status == "Online" else "Online"
+        now = datetime.now()
+        cursor.execute("UPDATE cameras SET status = %s, updated_at = %s WHERE id = %s", (new_status, now, camera_id))
+        msg = record_status_change_alert(db, cursor, "Camera", camera["camera_code"], camera["camera_name"], old_status, new_status)
+        db.commit()
+        return {
+            "success": True,
+            "camera_id": camera_id,
+            "camera_code": camera["camera_code"],
+            "camera_name": camera["camera_name"],
+            "old_status": old_status,
+            "status": new_status,
+            "message": msg or f"Camera {camera['camera_code']} is now {new_status}"
+        }
+    finally:
+        if cursor:
+            cursor.close()
+        db.close()
+
+
+@app.post("/api/cameras/ping-all")
+def ping_all_cameras_endpoint(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    token = credentials.credentials
+    admin = get_admin_from_token(token)
+    if admin is None:
+        raise HTTPException(status_code=401, detail="Invalid or expired token.")
+
+    db = get_db_connection()
+    if not db:
+        raise HTTPException(status_code=500, detail="Database connection failed")
+    cursor = None
+    try:
+        cursor = db.cursor(dictionary=True)
+        cursor.execute("SELECT id, camera_code, camera_name, ip_address, status, last_latency_ms, total_checks, successful_checks FROM cameras WHERE monitoring_enabled = 1")
+        cameras = cursor.fetchall()
+        cursor.close()
+        db.close()
+        db = None
+        cursor = None
+
+        def _ping_single_cam(cam):
+            ip = cam.get("ip_address")
+            success, lat = execute_network_ping(ip, timeout_sec=0.8)
+            now = datetime.now()
+            if success is None:
+                st = cam.get("status") or "Unknown"
+                lat = float(cam["last_latency_ms"]) if (cam.get("last_latency_ms") is not None and st == "Online") else None
+            else:
+                st = "Online" if success else "Offline"
+            tot = int(cam.get("total_checks") or 0) + 1
+            suc = int(cam.get("successful_checks") or 0) + (1 if st == "Online" else 0)
+            upt = round((suc / tot) * 100, 2)
+            return {
+                "id": cam["id"],
+                "status": st,
+                "latency_ms": lat,
+                "total_checks": tot,
+                "successful_checks": suc,
+                "uptime_percent": upt,
+                "last_check": now
+            }
+
+        results = []
+        if cameras:
+            with ThreadPoolExecutor(max_workers=min(25, len(cameras))) as executor:
+                futures = [executor.submit(_ping_single_cam, c) for c in cameras]
+                for fut in as_completed(futures):
+                    try:
+                        results.append(fut.result())
+                    except Exception:
+                        pass
+
+        if results:
+            db_w = get_db_connection()
+            if db_w:
+                cur_w = db_w.cursor()
+                cam_map = {c["id"]: c for c in cameras}
+                update_params = [
+                    (r["status"], r["latency_ms"], r["last_check"], r["total_checks"], r["successful_checks"], r["uptime_percent"], r["last_check"], r["id"])
+                    for r in results
+                ]
+                cur_w.executemany("""
+                    UPDATE cameras
+                    SET status = %s, last_latency_ms = %s, last_check = %s, total_checks = %s, successful_checks = %s, uptime_percent = %s, updated_at = %s
+                    WHERE id = %s
+                """, update_params)
+                for r in results:
+                    old_c = cam_map.get(r["id"])
+                    old_st = old_c.get("status") if old_c else None
+                    if old_st and old_st != r["status"]:
+                        record_status_change_alert(None, cur_w, "Camera", old_c["camera_code"], old_c["camera_name"], old_st, r["status"])
+                db_w.commit()
+                cur_w.close()
+                db_w.close()
+
+        db_r = get_db_connection()
+        if db_r:
+            cur_r = db_r.cursor(dictionary=True)
+            cur_r.execute("SELECT * FROM cameras ORDER BY id")
+            all_cams = cur_r.fetchall()
+            cur_r.close()
+            db_r.close()
+            return {"success": True, "cameras": all_cams}
+        return {"success": True, "cameras": []}
+    except Exception as err:
+        raise HTTPException(status_code=500, detail=str(err))
+    finally:
+        if cursor:
+            try: cursor.close()
+            except Exception: pass
+        if db:
+            try: db.close()
+            except Exception: pass
+
+
+# ==========================================================
+# CCTV MONITORING SETTINGS
+# ==========================================================
+
+class CameraMonitoringSettingsRequest(BaseModel):
+    camera_monitoring: bool
+    camera_interval: int
+    camera_retry_interval: int
+
+@app.get("/api/settings/camera")
+def get_camera_monitoring_settings(
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    token = credentials.credentials
+    admin = get_admin_from_token(token)
+    if admin is None:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or expired token."
+        )
+
+    db = get_db_connection()
+    if db is None:
+        raise HTTPException(
+            status_code=500,
+            detail="Database connection failed."
+        )
+
+    cursor = None
+    try:
+        cursor = db.cursor(dictionary=True)
+        cursor.execute(
+            """
+            SELECT
+                COUNT(*) AS total_cameras,
+                SUM(CASE WHEN monitoring_enabled = 1 THEN 1 ELSE 0 END) AS enabled_cameras,
+                COALESCE(MIN(monitoring_interval), 30) AS camera_interval,
+                COALESCE(MIN(offline_retry_interval), 120) AS camera_retry_interval
+            FROM cameras
+            """
+        )
+        row = cursor.fetchone() or {}
+        enabled_cams = int(row.get("enabled_cameras") or 0)
+        return {
+            "success": True,
+            "camera_monitoring": enabled_cams > 0,
+            "camera_interval": int(row.get("camera_interval") or 30),
+            "camera_retry_interval": int(row.get("camera_retry_interval") or 120)
+        }
+    except Exception as error:
+        raise HTTPException(
+            status_code=500,
+            detail=str(error)
+        )
+    finally:
+        if cursor:
+            cursor.close()
+        if db:
+            db.close()
+
+@app.put("/api/settings/camera")
+def update_camera_monitoring_settings(
+    data: CameraMonitoringSettingsRequest,
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+
+    token = credentials.credentials
+
+    # ------------------------------------------
+    # VERIFY ADMIN
+    # ------------------------------------------
+
+    admin = get_admin_from_token(token)
+
+    if admin is None:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or expired token."
+        )
+
+    # ------------------------------------------
+    # VALIDATE CAMERA INTERVAL
+    # ------------------------------------------
+
+    if data.camera_interval <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Camera interval must be greater than 0."
+        )
+
+    # ------------------------------------------
+    # VALIDATE OFFLINE RETRY INTERVAL
+    # ------------------------------------------
+
+    if data.camera_retry_interval <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Camera retry interval must be greater than 0."
+        )
+
+    # ------------------------------------------
+    # DATABASE CONNECTION
+    # ------------------------------------------
+
+    db = get_db_connection()
+
+    if db is None:
+        raise HTTPException(
+            status_code=500,
+            detail="Database connection failed."
+        )
+
+    cursor = None
+
+    try:
+
+        cursor = db.cursor()
+
+        # --------------------------------------
+        # APPLY SETTINGS TO ALL CCTV CAMERAS
+        # --------------------------------------
+
+        cursor.execute(
+            """
+            UPDATE cameras
+            SET
+                monitoring_enabled = %s,
+                monitoring_interval = %s,
+                offline_retry_interval = %s,
+                updated_at = %s
+            """,
+            (
+                1 if data.camera_monitoring else 0,
+                data.camera_interval,
+                data.camera_retry_interval,
+                datetime.now()
+            )
+        )
+
+        db.commit()
+
+        return {
+            "success": True,
+            "message": "CCTV monitoring settings updated successfully.",
+            "camera_monitoring": data.camera_monitoring,
+            "camera_interval": data.camera_interval,
+            "camera_retry_interval": data.camera_retry_interval
+        }
+
+    except Exception as error:
+
+        db.rollback()
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(error)
+        )
+
+    finally:
+
+        if cursor:
+            cursor.close()
+
+        db.close()
+
+
+# ==========================================================
+# DELETE CCTV CAMERA API
+# ==========================================================
+
+@app.delete("/api/cameras/{camera_id}")
+def delete_camera(
+    camera_id: int,
+    admin=Depends(get_current_admin)
+):
+
+    db = get_db_connection()
+
+    if db is None:
+        raise HTTPException(
+            status_code=500,
+            detail="Database connection failed."
+        )
+
+    cursor = None
+
+    try:
+
+        cursor = db.cursor(dictionary=True)
+
+        # ------------------------------------------
+        # CHECK CAMERA EXISTS
+        # ------------------------------------------
+
+        cursor.execute(
+            """
+            SELECT
+                id,
+                camera_code,
+                camera_name,
+                ip_address
+            FROM cameras
+            WHERE id = %s
+            LIMIT 1
+            """,
+            (camera_id,)
+        )
+
+        camera = cursor.fetchone()
+
+        if not camera:
+            raise HTTPException(
+                status_code=404,
+                detail="CCTV camera not found."
+            )
+
+        # ------------------------------------------
+        # PERMANENT DELETE
+        # ------------------------------------------
+
+        cursor.execute(
+            """
+            DELETE FROM cameras
+            WHERE id = %s
+            """,
+            (camera_id,)
+        )
+
+        db.commit()
+
+        return {
+            "success": True,
+            "message": "CCTV camera permanently deleted.",
+            "deleted_camera": {
+                "id": camera["id"],
+                "camera_code": camera["camera_code"],
+                "camera_name": camera["camera_name"],
+                "ip_address": camera["ip_address"]
+            }
+        }
+
+    except HTTPException:
+        db.rollback()
+        raise
+
+    except Exception as error:
+
+        db.rollback()
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(error)
+        )
+
+    finally:
+
+        if cursor:
+            cursor.close()
+
+        db.close()
+
+
+        # ==========================================
+# DELETE DEVICE
+# ==========================================
+
+@app.delete("/api/devices/{device_id}")
+def delete_device(
+    device_id: int,
+    admin=Depends(get_current_admin)
+):
+    db = get_db_connection()
+    cursor = None
+
+    try:
+        cursor = db.cursor(dictionary=True)
+
+        # আগে device আছে কিনা check
+        cursor.execute(
+            """
+            SELECT
+                id,
+                device_code,
+                device_name,
+                ip_address
+            FROM devices
+            WHERE id = %s
+            """,
+            (device_id,)
+        )
+
+        device = cursor.fetchone()
+
+        if not device:
+            raise HTTPException(
+                status_code=404,
+                detail="Device not found"
+            )
+
+        # Device permanently delete
+        cursor.execute(
+            """
+            DELETE FROM devices
+            WHERE id = %s
+            """,
+            (device_id,)
+        )
+
+        db.commit()
+
+        return {
+            "success": True,
+            "message": "Device deleted successfully.",
+            "deleted_device": {
+                "id": device["id"],
+                "device_code": device["device_code"],
+                "device_name": device["device_name"],
+                "ip_address": device["ip_address"]
+            }
+        }
+
+    finally:
+        if cursor:
+            cursor.close()
+
+        db.close()
+
+
+  # ==========================================================
+# NMS AUTOMATIC DEVICE MONITORING ENGINE
+# ==========================================================
+
+monitoring_stop_event = threading.Event()
+monitoring_thread = None
+
+cctv_monitoring_stop_event = threading.Event()
+cctv_monitoring_thread = None
+
+
+# ----------------------------------------------------------
+# PING ONE DEVICE
+# ----------------------------------------------------------
+
+def automatic_ping_device(device):
+    """
+    Automatically ping one enabled device.
+    Updates status, latency, uptime and last_check.
+    """
+
+    db = None
+    cursor = None
+
+    try:
+
+        device_id = device["id"]
+        device_code = device["device_code"]
+        ip_address = device["ip_address"]
+
+        if is_cloud_environment() and is_private_ip(ip_address):
+            # Cloud container cannot reach Plant LAN directly (RFC 1918).
+            # On-premises plant probe agent monitors these and syncs live to TiDB Cloud.
+            # Cloud background thread must NOT overwrite on-prem device telemetry.
+            return
+
+        # --------------------------------------------------
+        # EXECUTE REAL RESILIENT PING
+        # --------------------------------------------------
+        ping_success, latency = execute_network_ping(ip_address, timeout_sec=1.0)
+        if ping_success is None:
+            return
+
+
+        # --------------------------------------------------
+        # STATUS
+        # --------------------------------------------------
+
+        status = (
+            "Online"
+            if ping_success
+            else "Offline"
+        )
+
+
+        now = datetime.now()
+
+
+        # --------------------------------------------------
+        # DATABASE CONNECTION
+        # --------------------------------------------------
+
+        db = get_db_connection()
+
+        if db is None:
+
+            print(
+                f"[NMS MONITOR] "
+                f"{device_code} -> Database connection failed"
+            )
+
+            return
+
+
+        cursor = db.cursor(
+            dictionary=True
+        )
+
+
+        # --------------------------------------------------
+        # LOCK CURRENT COUNTERS
+        # --------------------------------------------------
+
+        cursor.execute(
+            """
+            SELECT
+                status,
+                total_checks,
+                successful_checks
+            FROM devices
+            WHERE id = %s
+            LIMIT 1
+            FOR UPDATE
+            """,
+            (device_id,)
+        )
+
+
+        current = cursor.fetchone()
+
+
+        if not current:
+
+            db.rollback()
+            return
+
+
+        total_checks = int(
+            current["total_checks"] or 0
+        )
+
+
+        successful_checks = int(
+            current["successful_checks"] or 0
+        )
+
+
+        # --------------------------------------------------
+        # UPDATE CHECK COUNTERS
+        # --------------------------------------------------
+
+        total_checks += 1
+
+
+        if ping_success:
+
+            successful_checks += 1
+
+
+        # --------------------------------------------------
+        # CALCULATE UPTIME
+        # --------------------------------------------------
+
+        uptime_percent = (
+            successful_checks /
+            total_checks
+        ) * 100
+
+
+        uptime_percent = round(
+            uptime_percent,
+            2
+        )
+
+
+        # --------------------------------------------------
+        # SAVE RESULT
+        # --------------------------------------------------
+
+        cursor.execute(
+            """
+            UPDATE devices
+            SET
+                status = %s,
+                last_check = %s,
+                last_latency_ms = %s,
+                total_checks = %s,
+                successful_checks = %s,
+                uptime_percent = %s,
+                updated_at = %s
+            WHERE id = %s
+            """,
+            (
+                status,
+                now,
+                latency,
+                total_checks,
+                successful_checks,
+                uptime_percent,
+                now,
+                device_id
+            )
+        )
+
+        old_status = current.get("status") or device.get("status")
+        if (old_status and old_status != status) or (not old_status and status == "Offline"):
+            record_status_change_alert(
+                None, cursor, "Device",
+                device_code, device.get("device_name") or device_code,
+                old_status or "Online", status
+            )
+
+        db.commit()
+
+
+        print(
+            f"[NMS MONITOR] "
+            f"{device_code} | "
+            f"{ip_address} | "
+            f"{status} | "
+            f"Latency={latency if latency is not None else '-'} ms | "
+            f"Uptime={uptime_percent}%"
+        )
+
+
+    except subprocess.TimeoutExpired:
+
+        print(
+            f"[NMS MONITOR] "
+            f"{device.get('device_code', device.get('id'))} "
+            f"-> Ping timeout"
+        )
+
+
+    except Exception as error:
+
+        if db:
+
+            try:
+                db.rollback()
+            except Exception:
+                pass
+
+
+        print(
+            f"[NMS MONITOR ERROR] "
+            f"{device.get('device_code', device.get('id'))}: "
+            f"{error}"
+        )
+
+
+    finally:
+
+        if cursor:
+
+            try:
+                cursor.close()
+            except Exception:
+                pass
+
+
+        if db:
+
+            try:
+                db.close()
+            except Exception:
+                pass
+
+
+# ==========================================================
+# AUTOMATIC MONITORING LOOP
+# ==========================================================
+
+def automatic_monitoring_loop():
+
+    print(
+        "[SUCCESS] NMS automatic device monitoring started."
+    )
+
+
+    while not monitoring_stop_event.is_set():
+
+        db = None
+        cursor = None
+
+
+        try:
+
+            db = get_db_connection()
+
+
+            if db is None:
+
+                monitoring_stop_event.wait(
+                    5
+                )
+
+                continue
+
+
+            cursor = db.cursor(
+                dictionary=True
+            )
+
+
+            # ------------------------------------------------
+            # GET ENABLED DEVICES
+            # ------------------------------------------------
+
+            cursor.execute(
+                """
+                SELECT
+                    id,
+                    device_code,
+                    device_name,
+                    ip_address,
+                    status,
+                    last_latency_ms,
+                    monitoring_enabled,
+                    monitoring_interval,
+                    last_check
+                FROM devices
+                WHERE monitoring_enabled = 1
+                ORDER BY id
+                """
+            )
+
+
+            devices = cursor.fetchall()
+            cursor.close()
+            db.close()
+            cursor = None
+            db = None
+
+            # ------------------------------------------------
+            # CHECK DEVICES
+            # ------------------------------------------------
+
+            for device in devices:
+
+                if monitoring_stop_event.is_set():
+
+                    break
+
+
+                # --------------------------------------------
+                # DEVICE INTERVAL
+                # --------------------------------------------
+
+                interval = int(
+                    device.get(
+                        "monitoring_interval"
+                    ) or 10
+                )
+
+
+                if interval <= 0:
+
+                    interval = 60
+
+
+                # --------------------------------------------
+                # LAST CHECK
+                # --------------------------------------------
+
+                last_check = (
+                    device.get("last_check")
+                )
+
+
+                # --------------------------------------------
+                # FIRST CHECK
+                # --------------------------------------------
+
+                if last_check is None:
+
+                    automatic_ping_device(
+                        device
+                    )
+
+                    continue
+
+
+                # --------------------------------------------
+                # CALCULATE ELAPSED TIME
+                # --------------------------------------------
+
+                try:
+                    if isinstance(last_check, datetime):
+                        elapsed = (datetime.now() - last_check).total_seconds()
+                    else:
+                        clean_str = str(last_check).strip().replace(" ", "T")
+                        last_check_dt = datetime.fromisoformat(clean_str)
+                        elapsed = (datetime.now() - last_check_dt).total_seconds()
+                except Exception:
+                    elapsed = 0
+
+
+                # --------------------------------------------
+                # DEVICE CHECK DUE?
+                # --------------------------------------------
+
+                if elapsed >= interval:
+
+                    automatic_ping_device(
+                        device
+                    )
+
+
+        except Exception as error:
+
+            print(
+                f"[NMS MONITOR LOOP ERROR] {error}"
+            )
+
+
+        finally:
+
+            if cursor:
+
+                try:
+                    cursor.close()
+                except Exception:
+                    pass
+
+
+            if db:
+
+                try:
+                    db.close()
+                except Exception:
+                    pass
+
+
+        # ----------------------------------------------------
+        # LOOP CHECK
+        # ----------------------------------------------------
+        # Checks every 1 second whether a device is due.
+        # Actual ping happens only when that device's
+        # configured monitoring_interval has elapsed.
+        # ----------------------------------------------------
+
+        monitoring_stop_event.wait(
+            5
+        )
+
+
+    print(
+        "🛑 NMS automatic device monitoring stopped."
+    )
+
+# ==========================================================
+# NMS AUTOMATIC DESKTOP MONITORING ENGINE
+# ==========================================================
+
+desktop_monitoring_stop_event = threading.Event()
+desktop_monitoring_thread = None
+
+
+# ----------------------------------------------------------
+# PING ONE DESKTOP
+# ----------------------------------------------------------
+
+def automatic_ping_desktop(desktop):
+
+    db = None
+    cursor = None
+
+    try:
+
+        desktop_id = desktop["id"]
+        desktop_code = desktop["desktop_code"]
+        ip_address = desktop["ip_address"]
+
+        if is_cloud_environment() and is_private_ip(ip_address):
+            # Cloud container cannot reach Plant LAN directly.
+            # On-premises plant probe agent monitors and syncs live to TiDB Cloud.
+            return
+
+        # ------------------------------------------
+        # REAL RESILIENT PING
+        # ------------------------------------------
+        ping_success, latency = execute_network_ping(ip_address, timeout_sec=1.0)
+        if ping_success is None:
+            return
+
+        # ------------------------------------------
+        # STATUS
+        # ------------------------------------------
+
+        status = (
+            "Online"
+            if ping_success
+            else "Offline"
+        )
+
+        now = datetime.now()
+
+        # ------------------------------------------
+        # DATABASE
+        # ------------------------------------------
+
+        db = get_db_connection()
+
+        if db is None:
+
+            print(
+                f"[DESKTOP MONITOR] "
+                f"{desktop_code} -> Database connection failed"
+            )
+
+            return
+
+        cursor = db.cursor(
+            dictionary=True
+        )
+
+        # ------------------------------------------
+        # GET CURRENT COUNTERS
+        # ------------------------------------------
+
+        cursor.execute(
+            """
+            SELECT
+                status,
+                total_checks,
+                successful_checks
+            FROM desktops
+            WHERE id = %s
+            LIMIT 1
+            """,
+            (desktop_id,)
+        )
+
+        current = cursor.fetchone()
+
+        if not current:
+            return
+
+        total_checks = (
+            int(current["total_checks"] or 0)
+            + 1
+        )
+
+        successful_checks = (
+            int(current["successful_checks"] or 0)
+            + (1 if ping_success else 0)
+        )
+
+        uptime_percent = (
+            (
+                successful_checks /
+                total_checks
+            ) * 100
+            if total_checks > 0
+            else 0
+        )
+
+        uptime_percent = round(
+            uptime_percent,
+            2
+        )
+
+        # ------------------------------------------
+        # SAVE RESULT
+        # ------------------------------------------
+
+        cursor.execute(
+            """
+            UPDATE desktops
+            SET
+                status = %s,
+                last_check = %s,
+                last_latency_ms = %s,
+                total_checks = %s,
+                successful_checks = %s,
+                uptime_percent = %s,
+                updated_at = %s
+            WHERE id = %s
+            """,
+            (
+                status,
+                now,
+                latency,
+                total_checks,
+                successful_checks,
+                uptime_percent,
+                now,
+                desktop_id
+            )
+        )
+
+        old_status = current.get("status") or desktop.get("status")
+        if (old_status and old_status != status) or (not old_status and status == "Offline"):
+            record_status_change_alert(
+                None, cursor, "Desktop",
+                desktop_code, desktop.get("department") or desktop_code,
+                old_status or "Online", status
+            )
+
+        db.commit()
+
+        print(
+            f"[DESKTOP MONITOR] "
+            f"{desktop_code} | "
+            f"{ip_address} | "
+            f"{status} | "
+            f"Latency="
+            f"{latency if latency is not None else '-'} ms | "
+            f"Uptime={uptime_percent}%"
+        )
+
+    except subprocess.TimeoutExpired:
+
+        print(
+            f"[DESKTOP MONITOR] "
+            f"{desktop.get('desktop_code', desktop.get('id'))} "
+            f"-> Ping timeout"
+        )
+
+    except Exception as error:
+
+        if db:
+
+            try:
+                db.rollback()
+            except Exception:
+                pass
+
+        print(
+            f"[DESKTOP MONITOR ERROR] "
+            f"{desktop.get('desktop_code', desktop.get('id'))}: "
+            f"{error}"
+        )
+
+    finally:
+
+        if cursor:
+
+            try:
+                cursor.close()
+            except Exception:
+                pass
+
+        if db:
+
+            try:
+                db.close()
+            except Exception:
+                pass
+
+
+# ----------------------------------------------------------
+# AUTOMATIC DESKTOP MONITORING LOOP
+# ----------------------------------------------------------
+
+def automatic_desktop_monitoring_loop():
+
+    print(
+        "🖥️ NMS automatic desktop monitoring started."
+    )
+
+    while not desktop_monitoring_stop_event.is_set():
+
+        db = None
+        cursor = None
+
+        try:
+
+            db = get_db_connection()
+
+            if db is None:
+
+                desktop_monitoring_stop_event.wait(5)
+                continue
+
+            cursor = db.cursor(
+                dictionary=True
+            )
+
+            # ------------------------------------------
+            # GET MASTER MONITORING SETTINGS
+            # ------------------------------------------
+
+            cursor.execute(
+                """
+                SELECT
+                    enabled,
+                    selected_location
+                FROM desktop_monitoring_settings
+                WHERE id = 1
+                LIMIT 1
+                """
+            )
+
+            settings = cursor.fetchone()
+
+            # ------------------------------------------
+            # MASTER OFF
+            # ------------------------------------------
+
+            if not settings:
+
+                desktop_monitoring_stop_event.wait(2)
+                continue
+
+            monitoring_enabled = (
+                int(settings["enabled"] or 0) == 1
+            )
+
+            selected_location = (
+                settings["selected_location"]
+            )
+
+            if not monitoring_enabled:
+                desktop_monitoring_stop_event.wait(2)
+                continue
+
+            # ------------------------------------------
+            # GET DESKTOPS (SELECTED LOCATION OR ALL)
+            # ------------------------------------------
+
+            if selected_location and selected_location.strip().lower() not in ('all', '', 'none'):
+                cursor.execute(
+                    """
+                    SELECT
+                        id,
+                        desktop_code,
+                        location,
+                        ip_address,
+                        status,
+                        last_latency_ms,
+                        monitoring_enabled,
+                        monitoring_interval,
+                        last_check
+                    FROM desktops
+                    WHERE monitoring_enabled = 1
+                      AND LOWER(TRIM(location))
+                          = LOWER(TRIM(%s))
+                    ORDER BY id
+                    """,
+                    (selected_location,)
+                )
+            else:
+                cursor.execute(
+                    """
+                    SELECT
+                        id,
+                        desktop_code,
+                        location,
+                        ip_address,
+                        status,
+                        last_latency_ms,
+                        monitoring_enabled,
+                        monitoring_interval,
+                        last_check
+                    FROM desktops
+                    WHERE monitoring_enabled = 1
+                    ORDER BY id
+                    """
+                )
+
+            desktops = cursor.fetchall()
+            cursor.close()
+            db.close()
+            cursor = None
+            db = None
+
+            # ------------------------------------------
+            # CHECK DESKTOPS
+            # ------------------------------------------
+
+            for desktop in desktops:
+
+                if desktop_monitoring_stop_event.is_set():
+                    break
+
+                interval = int(
+                    desktop.get(
+                        "monitoring_interval"
+                    ) or 10
+                )
+
+                if interval <= 0:
+                    interval = 30
+
+                last_check = (
+                    desktop.get("last_check")
+                )
+
+                # --------------------------------------
+                # FIRST CHECK
+                # --------------------------------------
+
+                if last_check is None:
+
+                    automatic_ping_desktop(
+                        desktop
+                    )
+
+                    continue
+
+                # --------------------------------------
+                # ELAPSED TIME
+                # --------------------------------------
+
+                try:
+                    if isinstance(last_check, datetime):
+                        elapsed = (datetime.now() - last_check).total_seconds()
+                    else:
+                        clean_str = str(last_check).strip().replace(" ", "T")
+                        last_check_dt = datetime.fromisoformat(clean_str)
+                        elapsed = (datetime.now() - last_check_dt).total_seconds()
+                except Exception:
+                    elapsed = 0
+
+                # --------------------------------------
+                # PING ONLY WHEN DUE
+                # --------------------------------------
+
+                if elapsed >= interval:
+
+                    automatic_ping_desktop(
+                        desktop
+                    )
+
+        except Exception as error:
+
+            print(
+                f"[DESKTOP MONITOR LOOP ERROR] "
+                f"{error}"
+            )
+
+        finally:
+
+            if cursor:
+
+                try:
+                    cursor.close()
+                except Exception:
+                    pass
+
+            if db:
+
+                try:
+                    db.close()
+                except Exception:
+                    pass
+
+        # ------------------------------------------
+        # CHECK EVERY 1 SECOND
+        # Actual ping happens only when interval
+        # has elapsed.
+        # ------------------------------------------
+
+        desktop_monitoring_stop_event.wait(5)
+
+    print(
+        "🛑 NMS automatic desktop monitoring stopped."
+    )
+
+
+# ==========================================
+# AUTOMATIC CCTV MONITORING LOOP
+# ==========================================
+
+def automatic_cctv_monitoring_loop():
+
+    print("[CCTV] NMS automatic CCTV monitoring started.")
+
+    while not cctv_monitoring_stop_event.is_set():
+
+        db = None
+        cursor = None
+
+        try:
+
+            db = get_db_connection()
+
+            if db is None:
+                print("[ERROR] CCTV monitor: database connection failed.")
+                cctv_monitoring_stop_event.wait(5)
+                continue
+
+            cursor = db.cursor(dictionary=True)
+
+            # ------------------------------------------
+            # GET ALL ENABLED CAMERAS
+            # ------------------------------------------
+
+            cursor.execute(
+                """
+                SELECT
+                    id,
+                    camera_code,
+                    camera_name,
+                    ip_address,
+                    status,
+                    monitoring_enabled,
+                    monitoring_interval,
+                    offline_retry_interval,
+                    last_check,
+                    total_checks,
+                    successful_checks
+                FROM cameras
+                WHERE monitoring_enabled = 1
+                ORDER BY id
+                """
+            )
+
+            cameras = cursor.fetchall()
+            cursor.close()
+            db.close()
+            cursor = None
+            db = None
+
+            # ------------------------------------------
+            # CHECK EACH CAMERA
+            # ------------------------------------------
+
+            for camera in cameras:
+
+                if cctv_monitoring_stop_event.is_set():
+                    break
+
+                now = datetime.now()
+
+                last_check = camera["last_check"]
+
+                # --------------------------------------
+                # FIND CURRENT CHECK INTERVAL
+                # --------------------------------------
+
+                if camera["status"] == "Offline":
+                    check_interval = (
+                        camera["offline_retry_interval"]
+                        or 120
+                    )
+                else:
+                    check_interval = (
+                        camera["monitoring_interval"]
+                        or 15
+                    )
+
+                # --------------------------------------
+                # CHECK IF CAMERA IS DUE
+                # --------------------------------------
+
+                camera_due = False
+
+                if last_check is None:
+
+                    camera_due = True
+
+                else:
+
+                    try:
+                        if isinstance(last_check, datetime):
+                            elapsed_seconds = (now - last_check).total_seconds()
+                        else:
+                            clean_str = str(last_check).strip().replace(" ", "T")
+                            last_check_dt = datetime.fromisoformat(clean_str)
+                            elapsed_seconds = (now - last_check_dt).total_seconds()
+                    except Exception:
+                        elapsed_seconds = check_interval
+
+                    if elapsed_seconds >= check_interval:
+                        camera_due = True
+
+                if not camera_due:
+                    continue
+
+                # --------------------------------------
+                # PING CAMERA (RESILIENT)
+                # --------------------------------------
+
+                ip_address = camera["ip_address"]
+                if is_cloud_environment() and is_private_ip(ip_address):
+                    # Cloud container cannot reach Plant LAN directly.
+                    continue
+
+                ping_success, latency = execute_network_ping(ip_address, timeout_sec=1.0)
+                if ping_success is None:
+                    continue
+
+                # --------------------------------------
+                # NEW STATUS
+                # --------------------------------------
+
+                status = (
+                    "Online"
+                    if ping_success
+                    else "Offline"
+                )
+
+                now = datetime.now()
+
+                total_checks = (
+                    int(camera["total_checks"] or 0)
+                    + 1
+                )
+
+                successful_checks = (
+                    int(
+                        camera["successful_checks"]
+                        or 0
+                    )
+                    + (1 if ping_success else 0)
+                )
+
+                uptime_percent = (
+                    (
+                        successful_checks
+                        / total_checks
+                    ) * 100
+                    if total_checks > 0
+                    else 0
+                )
+
+                # --------------------------------------
+                # SAVE CCTV RESULT
+                # --------------------------------------
+
+                try:
+                    c_db = get_db_connection()
+                    if c_db:
+                        c_cur = c_db.cursor(dictionary=True)
+                        c_cur.execute(
+                            """
+                            UPDATE cameras
+                            SET
+                                status = %s,
+                                last_check = %s,
+                                last_latency_ms = %s,
+                                total_checks = %s,
+                                successful_checks = %s,
+                                uptime_percent = %s,
+                                updated_at = %s
+                            WHERE id = %s
+                            """,
+                            (
+                                status,
+                                now,
+                                latency,
+                                total_checks,
+                                successful_checks,
+                                uptime_percent,
+                                now,
+                                camera["id"]
+                            )
+                        )
+                        old_status = camera.get("status")
+                        if (old_status and old_status != status) or (not old_status and status == "Offline"):
+                            record_status_change_alert(
+                                None, c_cur, "Camera",
+                                camera["camera_code"], camera.get("camera_name") or camera["camera_code"],
+                                old_status or "Online", status
+                            )
+                        c_db.commit()
+                        c_cur.close()
+                        c_db.close()
+                except Exception as db_err:
+                    print(f"[CCTV DB Update Error]: {db_err}")
+
+                latency_text = (
+                    f"{latency:.1f} ms"
+                    if latency is not None
+                    else "-"
+                )
+
+                print(
+                    f"[NMS CCTV] "
+                    f"{camera['camera_code']} | "
+                    f"{ip_address} | "
+                    f"{status} | "
+                    f"Latency={latency_text} | "
+                    f"Uptime={uptime_percent:.2f}%"
+                )
+
+        except Exception as error:
+
+            print(
+                f"[ERROR] CCTV automatic monitoring error: "
+                f"{error}"
+            )
+
+            if db:
+                try:
+                    db.rollback()
+                except Exception:
+                    pass
+
+        finally:
+
+            if cursor:
+                try:
+                    cursor.close()
+                except Exception:
+                    pass
+
+            if db:
+                try:
+                    db.close()
+                except Exception:
+                    pass
+
+        # ------------------------------------------
+        # CHECK EVERY 5 SECONDS
+        # ------------------------------------------
+
+        cctv_monitoring_stop_event.wait(5)
+
+    print(
+        "🛑 NMS automatic CCTV monitoring stopped."
+    )
+
+
+from app.extra_routes import router as extra_router
+app.include_router(extra_router)
+
+# ==========================================================
+# START AUTOMATIC MONITORING
+# ==========================================================
+
+@app.on_event("startup")
+def start_automatic_monitoring():
+    try:
+        from app.auto_init_db import ensure_database_initialized
+        ensure_database_initialized()
+    except Exception as e:
+        print(f"[STARTUP DB INIT] {e}")
+
+    global monitoring_thread
+    global cctv_monitoring_thread
+    global desktop_monitoring_thread
+    
+    # ==========================================
+    # START DEVICE MONITORING
+    # ==========================================
+
+    if (
+        monitoring_thread is None
+        or not monitoring_thread.is_alive()
+    ):
+
+        monitoring_stop_event.clear()
+
+        monitoring_thread = threading.Thread(
+            target=automatic_monitoring_loop,
+            name="NMS-Automatic-Device-Monitor",
+            daemon=True
+        )
+
+        monitoring_thread.start()
+
+        print("[SUCCESS] NMS automatic device monitoring started.")
+
+    # ==========================================
+    # START CCTV MONITORING
+    # ==========================================
+
+    if (
+        cctv_monitoring_thread is None
+        or not cctv_monitoring_thread.is_alive()
+    ):
+
+        cctv_monitoring_stop_event.clear()
+
+        cctv_monitoring_thread = threading.Thread(
+            target=automatic_cctv_monitoring_loop,
+            name="NMS-Automatic-CCTV-Monitor",
+            daemon=True
+        )
+
+        cctv_monitoring_thread.start()
+
+        print("[CCTV] NMS automatic CCTV monitoring started.")
+
+
+    # ==========================================
+    # START DESKTOP MONITORING
+    # ==========================================
+
+    if (
+        desktop_monitoring_thread is None
+        or not desktop_monitoring_thread.is_alive()
+    ):
+
+        desktop_monitoring_stop_event.clear()
+
+        desktop_monitoring_thread = threading.Thread(
+            target=automatic_desktop_monitoring_loop,
+            name="NMS-Automatic-Desktop-Monitor",
+            daemon=True
+        )
+
+        desktop_monitoring_thread.start()
+
+        print(
+            "🖥️ NMS automatic desktop monitoring started."
+        )
+
+# ==========================================================
+# STOP AUTOMATIC MONITORING
+# ==========================================================
+
+@app.on_event("shutdown")
+def stop_automatic_monitoring():
+
+    global monitoring_thread
+    global cctv_monitoring_thread
+    global desktop_monitoring_thread
+
+    # ==========================================
+    # STOP DEVICE MONITORING
+    # ==========================================
+
+    monitoring_stop_event.set()
+
+    if (
+        monitoring_thread is not None
+        and monitoring_thread.is_alive()
+    ):
+
+        monitoring_thread.join(
+            timeout=5
+        )
+
+    monitoring_thread = None
+
+    # ==========================================
+    # STOP CCTV MONITORING
+    # ==========================================
+
+    cctv_monitoring_stop_event.set()
+
+    if (
+        cctv_monitoring_thread is not None
+        and cctv_monitoring_thread.is_alive()
+    ):
+
+        cctv_monitoring_thread.join(
+            timeout=5
+        )
+
+    cctv_monitoring_thread = None
+
+    print(
+        "🛑 NMS device + CCTV monitoring shutdown complete."
+    )
+
+    # ==========================================
+    # STOP DESKTOP MONITORING
+    # ==========================================
+
+    desktop_monitoring_stop_event.set()
+
+    if (
+        desktop_monitoring_thread is not None
+        and desktop_monitoring_thread.is_alive()
+    ):
+
+        desktop_monitoring_thread.join(
+            timeout=5
+        )
+
+    desktop_monitoring_thread = None
+
+# CCTV controls defined above
+
+# ==========================================
+# FRONTEND STATIC FILES FOR LOCAL & CLOUD HOSTING
+# ==========================================
+@app.get("/{full_path:path}", include_in_schema=False)
+def serve_frontend_files(full_path: str):
+    clean = (full_path or "").lstrip("/")
+    if not clean or clean == "/":
+        clean = "login.html"
+
+    target = find_frontend_file(clean)
+    if target and os.path.isfile(target):
+        headers = {}
+        if target.endswith((".html", ".js", ".css")):
+            headers["Cache-Control"] = "no-cache"
+        return FileResponse(target, headers=headers)
+
+    login_fallback = find_frontend_file("login.html")
+    if login_fallback and os.path.isfile(login_fallback):
+        return FileResponse(login_fallback)
+
+    return {"detail": "Not Found"}

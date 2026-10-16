@@ -114,44 +114,56 @@ def generate_report_data(conn, from_date_str: str = None, to_date_str: str = Non
     # Group transition events by asset code
     events_by_code = {a["code"]: [] for a in all_assets}
 
+    def extract_event_status(text: str):
+        if not text:
+            return None
+        t = text.lower()
+        if "restored online" in t or "went online" in t or "back online" in t:
+            return "Online"
+        if "went offline" in t or "now offline" in t or "offline" in t:
+            return "Offline"
+        if "online" in t:
+            return "Online"
+        if "warning" in t:
+            return "Warning"
+        return None
+
+    def ensure_datetime(val):
+        if isinstance(val, datetime.datetime):
+            return val
+        if isinstance(val, str):
+            try:
+                return datetime.datetime.fromisoformat(val.strip().replace(" ", "T"))
+            except Exception:
+                pass
+        return None
+
     for alert in raw_alerts:
         msg = alert.get("message", "")
-        msg_lower = msg.lower()
-        status = None
-        if "went offline" in msg_lower or "offline" in msg_lower:
-            status = "Offline"
-        elif "restored online" in msg_lower or "went online" in msg_lower or "online" in msg_lower:
-            status = "Online"
-        elif "warning" in msg_lower:
-            status = "Warning"
+        status = extract_event_status(msg)
+        ts = ensure_datetime(alert.get("created_at")) or now
 
         if status and alert.get("source_name") in events_by_code:
             events_by_code[alert["source_name"]].append({
                 "source_type": alert["source_type"],
                 "source_name": alert["source_name"],
                 "status": status,
-                "timestamp": alert["created_at"],
+                "timestamp": ts,
                 "raw_message": msg
             })
 
     # Also incorporate logs if applicable
     for log in raw_logs:
         desc = log.get("description", "")
-        desc_lower = desc.lower()
-        status = None
-        if "went offline" in desc_lower or "offline" in desc_lower:
-            status = "Offline"
-        elif "restored online" in desc_lower or "went online" in desc_lower or "online" in desc_lower:
-            status = "Online"
-        elif "warning" in desc_lower:
-            status = "Warning"
+        status = extract_event_status(desc)
+        ts = ensure_datetime(log.get("created_at")) or now
 
         if status and log.get("source_name") in events_by_code:
             events_by_code[log["source_name"]].append({
                 "source_type": log.get("event_type", "System"),
                 "source_name": log["source_name"],
                 "status": status,
-                "timestamp": log["created_at"],
+                "timestamp": ts,
                 "raw_message": desc
             })
 

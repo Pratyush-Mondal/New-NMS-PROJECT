@@ -19,10 +19,16 @@ router = APIRouter()
 
 def record_status_change_alert(db, cursor, source_type: str, code: str, name: str, old_status: str, new_status: str):
     """Records an alert and log whenever an asset transitions between Online and Offline."""
-    if not old_status or old_status == new_status:
+    if not old_status:
+        if new_status == "Offline":
+            old_status = "Online"
+        else:
+            return None
+    if old_status == new_status:
         return None
     try:
         now_dt = datetime.now()
+        disp_name = (name or code).strip()
         # Always resolve previous active/acknowledged alerts for this asset before recording new transition
         cursor.execute("""
             UPDATE alerts SET status = 'Resolved' WHERE source_name = %s AND status IN ('New', 'Acknowledged')
@@ -30,7 +36,7 @@ def record_status_change_alert(db, cursor, source_type: str, code: str, name: st
 
         if new_status == "Offline":
             sev = "Critical" if source_type == "Device" else "Warning"
-            msg = f"{source_type} {code} ({name}) went Offline"
+            msg = f"{source_type} {code} ({disp_name}) went Offline"
             cursor.execute("""
                 INSERT INTO alerts (source_type, source_name, message, severity, status, created_at)
                 VALUES (%s, %s, %s, %s, 'New', %s)
@@ -40,7 +46,7 @@ def record_status_change_alert(db, cursor, source_type: str, code: str, name: st
                 VALUES ('Status Change', %s, %s, %s)
             """, (code, msg, now_dt))
         elif new_status == "Online":
-            msg = f"{source_type} {code} ({name}) restored Online"
+            msg = f"{source_type} {code} ({disp_name}) restored Online"
             cursor.execute("""
                 INSERT INTO alerts (source_type, source_name, message, severity, status, created_at)
                 VALUES (%s, %s, %s, 'Info', 'New', %s)
@@ -60,13 +66,14 @@ def record_status_change_alert(db, cursor, source_type: str, code: str, name: st
 _last_sync_offline_time = 0.0
 
 def sync_offline_alerts(cursor, db, force=False):
-    """Ensure offline assets have an alert recorded without duplicating or resurrecting acknowledged/resolved ones."""
+    """Ensure offline assets have an active alert recorded without duplicating or resurrecting acknowledged/resolved ones."""
     global _last_sync_offline_time
     now_ts = time.time()
-    if not force and (now_ts - _last_sync_offline_time) < 15:
+    if not force and (now_ts - _last_sync_offline_time) < 3:
         return
     _last_sync_offline_time = now_ts
     try:
+        now_dt = datetime.now()
         # 1. Devices
         cursor.execute("SELECT device_code, device_name, status FROM devices WHERE status = 'Offline'")
         for d in cursor.fetchall():
@@ -80,15 +87,15 @@ def sync_offline_alerts(cursor, db, force=False):
             existing_active = cursor.fetchone()
             if not existing_active:
                 cursor.execute("UPDATE alerts SET status = 'Resolved' WHERE source_name = %s AND status IN ('New', 'Acknowledged')", (d['device_code'],))
-                msg = f"Device {d['device_code']} ({d['device_name']}) went Offline"
+                msg = f"Device {d['device_code']} ({d['device_name'] or d['device_code']}) went Offline"
                 cursor.execute("""
                     INSERT INTO alerts (source_type, source_name, message, severity, status, created_at)
-                    VALUES ('Device', %s, %s, 'Critical', 'New', NOW())
-                """, (d['device_code'], msg))
+                    VALUES ('Device', %s, %s, 'Critical', 'New', %s)
+                """, (d['device_code'], msg, now_dt))
                 cursor.execute("""
                     INSERT INTO logs (event_type, source_name, description, created_at)
-                    VALUES ('Status Change', %s, %s, NOW())
-                """, (d['device_code'], msg))
+                    VALUES ('Status Change', %s, %s, %s)
+                """, (d['device_code'], msg, now_dt))
 
         # 2. Cameras
         cursor.execute("SELECT camera_code, camera_name, status FROM cameras WHERE status = 'Offline'")
@@ -103,15 +110,15 @@ def sync_offline_alerts(cursor, db, force=False):
             existing_active = cursor.fetchone()
             if not existing_active:
                 cursor.execute("UPDATE alerts SET status = 'Resolved' WHERE source_name = %s AND status IN ('New', 'Acknowledged')", (c['camera_code'],))
-                msg = f"Camera {c['camera_code']} ({c['camera_name']}) went Offline"
+                msg = f"Camera {c['camera_code']} ({c['camera_name'] or c['camera_code']}) went Offline"
                 cursor.execute("""
                     INSERT INTO alerts (source_type, source_name, message, severity, status, created_at)
-                    VALUES ('Camera', %s, %s, 'Warning', 'New', NOW())
-                """, (c['camera_code'], msg))
+                    VALUES ('Camera', %s, %s, 'Warning', 'New', %s)
+                """, (c['camera_code'], msg, now_dt))
                 cursor.execute("""
                     INSERT INTO logs (event_type, source_name, description, created_at)
-                    VALUES ('Status Change', %s, %s, NOW())
-                """, (c['camera_code'], msg))
+                    VALUES ('Status Change', %s, %s, %s)
+                """, (c['camera_code'], msg, now_dt))
 
         # 3. Desktops
         cursor.execute("SELECT desktop_code, department, status FROM desktops WHERE status = 'Offline'")
@@ -126,15 +133,15 @@ def sync_offline_alerts(cursor, db, force=False):
             existing_active = cursor.fetchone()
             if not existing_active:
                 cursor.execute("UPDATE alerts SET status = 'Resolved' WHERE source_name = %s AND status IN ('New', 'Acknowledged')", (dk['desktop_code'],))
-                msg = f"Desktop {dk['desktop_code']} ({dk['department']}) went Offline"
+                msg = f"Desktop {dk['desktop_code']} ({dk['department'] or dk['desktop_code']}) went Offline"
                 cursor.execute("""
                     INSERT INTO alerts (source_type, source_name, message, severity, status, created_at)
-                    VALUES ('Desktop', %s, %s, 'Warning', 'New', NOW())
-                """, (dk['desktop_code'], msg))
+                    VALUES ('Desktop', %s, %s, 'Warning', 'New', %s)
+                """, (dk['desktop_code'], msg, now_dt))
                 cursor.execute("""
                     INSERT INTO logs (event_type, source_name, description, created_at)
-                    VALUES ('Status Change', %s, %s, NOW())
-                """, (dk['desktop_code'], msg))
+                    VALUES ('Status Change', %s, %s, %s)
+                """, (dk['desktop_code'], msg, now_dt))
 
         # 4. Auto-resolve any lingering offline alerts for assets that are now Online
         cursor.execute("""
@@ -183,7 +190,7 @@ def get_dashboard_stats(admin=Depends(verify_admin)):
         cursor.execute("SELECT COUNT(*) as t, SUM(CASE WHEN status='Online' THEN 1 ELSE 0 END) as o FROM desktops")
         desk_stats = cursor.fetchone()
         
-        cursor.execute("SELECT COUNT(*) as c FROM alerts WHERE status='New'")
+        cursor.execute("SELECT COUNT(*) as c FROM alerts WHERE status IN ('New', 'Acknowledged')")
         alerts_count = cursor.fetchone()["c"]
 
         total = int(dev_stats["t"] or 0) + int(cam_stats["t"] or 0) + int(desk_stats["t"] or 0)
@@ -229,9 +236,9 @@ def get_alerts(status: str = None, admin=Depends(verify_admin)):
     try:
         sync_offline_alerts(cursor, db)
         if status:
-            cursor.execute("SELECT * FROM alerts WHERE status = %s ORDER BY created_at DESC LIMIT 100", (status,))
+            cursor.execute("SELECT * FROM alerts WHERE status = %s ORDER BY created_at DESC LIMIT 200", (status,))
         else:
-            cursor.execute("SELECT * FROM alerts ORDER BY CASE WHEN status = 'New' THEN 0 WHEN status = 'Acknowledged' THEN 1 ELSE 2 END, created_at DESC LIMIT 100")
+            cursor.execute("SELECT * FROM alerts ORDER BY CASE WHEN status = 'New' THEN 0 WHEN status = 'Acknowledged' THEN 1 ELSE 2 END, created_at DESC LIMIT 200")
         return {"success": True, "alerts": cursor.fetchall()}
     finally:
         cursor.close()

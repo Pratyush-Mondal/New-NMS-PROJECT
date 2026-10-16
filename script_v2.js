@@ -7046,10 +7046,6 @@ async function loadDashboardStats() {
                 let enableAlerts = true;
                 try { const s = JSON.parse(localStorage.getItem('nmsSettings') || '{}'); if(s.alert === false) enableAlerts = false; } catch(e){}
                 
-                if (!enableAlerts) {
-                    data.active_alerts = 0;
-                }
-                
                 let prevAlertCount = window.lastKnownAlertCount !== undefined ? window.lastKnownAlertCount : data.active_alerts;
                 if (data.active_alerts > prevAlertCount && enableAlerts && isSoundNotificationEnabled()) {
                     if (typeof toast === "function") toast("⚠️ New system alert detected!");
@@ -7132,11 +7128,9 @@ async function loadDashboardStats() {
             if (alData.success) {
                 const alList = document.getElementById('dashAlertsList');
                 if (alList) {
-                    let enableAlerts = true;
-                    try { const s = JSON.parse(localStorage.getItem('nmsSettings') || '{}'); if(s.alert === false) enableAlerts = false; } catch(e){}
                     alList.innerHTML = '';
-                    const activeAlerts = (alData.alerts || []).filter(a => a.status === 'New');
-                    const alerts = enableAlerts ? activeAlerts.slice(0, 4) : [];
+                    const activeAlerts = (alData.alerts || []).filter(a => a.status === 'New' || a.status === 'Acknowledged');
+                    const alerts = activeAlerts.slice(0, 4);
                     if (alerts.length === 0) {
                         alList.innerHTML = '<div style="padding:20px;text-align:center;color:#688097">No recent alerts. Everything is healthy.</div>';
                     } else {
@@ -7147,7 +7141,7 @@ async function loadDashboardStats() {
                             alList.innerHTML += `
                                 <div class="alert ${cls}">
                                     <i>${icon}</i>
-                                    <div><b>${a.message}</b><small>${a.source_type} ${a.source_name} · ${time}</small></div>
+                                    <div><b>${a.message}</b><small>${a.source_type} ${a.source_name} · ${time} · ${a.status.toUpperCase()}</small></div>
                                     <label>${a.severity}</label>
                                 </div>
                             `;
@@ -7284,12 +7278,11 @@ async function loadAlerts() {
         if (res.ok) {
             const data = await res.json();
             if (data.success && Array.isArray(data.alerts)) {
-                let enableAlerts = true;
-                try { const s = JSON.parse(localStorage.getItem('nmsSettings') || '{}'); if(s.alert === false) enableAlerts = false; } catch(e){}
-                if(!enableAlerts) data.alerts = [];
+                // Active alerts are those currently unresolved (New or Acknowledged)
+                const activeAlerts = data.alerts.filter(a => a.status === 'New' || a.status === 'Acknowledged');
+                const newAlerts = data.alerts.filter(a => a.status === 'New');
 
-                // Count active 'New' alerts for sidebar, header, and dashboard badges
-                const activeAlerts = data.alerts.filter(a => a.status === 'New');
+                // Synchronize sidebar, header, dashboard, and report badge counters
                 const sbAlerts = document.getElementById('sidebarAlertsCount');
                 const hrAlerts = document.getElementById('headerAlertsCount');
                 const dashAlerts = document.getElementById('dashAlerts');
@@ -7318,7 +7311,7 @@ async function loadAlerts() {
                             <div style="padding:48px 20px;text-align:center;color:#688097;">
                                 <div style="font-size:42px;color:#10b981;margin-bottom:12px;line-height:1;">✓</div>
                                 <b style="font-size:18px;color:#eff5fb;display:block;margin-bottom:8px;">No Active Alerts</b>
-                                <p style="font-size:13px;color:#64798e;margin:0;">All infrastructure incidents have been acknowledged & cleared. Everything is healthy and operational.</p>
+                                <p style="font-size:13px;color:#64798e;margin:0;">All infrastructure incidents have been resolved & cleared. Everything is healthy and operational.</p>
                             </div>
                         `;
                     } else {
@@ -7335,9 +7328,10 @@ async function loadAlerts() {
                 
                 displayAlerts.forEach(a => {
                     const isNew = a.status === 'New';
+                    const isAck = a.status === 'Acknowledged';
                     const cssBg = a.severity === 'Critical' ? 'critical-bg' : (a.severity === 'Warning' ? 'warning-bg' : 'info-bg');
                     const cssBorder = a.severity === 'Critical' ? 'critical-border' : (a.severity === 'Warning' ? 'warning-border' : 'info-border');
-                    const statusBadgeClass = isNew ? (a.severity === 'Critical' ? 'critical-bg' : 'warning-bg') : (a.status === 'Acknowledged' ? 'warning-bg' : 'info-bg');
+                    const statusBadgeClass = isNew ? (a.severity === 'Critical' ? 'critical-bg' : 'warning-bg') : (isAck ? 'warning-bg' : 'info-bg');
                     const statusLabel = isNew ? '● ACTIVE' : (a.status || 'LOGGED').toUpperCase();
                     const createdDate = new Date(a.created_at);
                     
@@ -7383,7 +7377,7 @@ async function loadAlerts() {
 
                     let cleanMsg = a.message;
                     
-                    alertList.innerHTML += '<div class="incident ' + cssBorder + '" style="' + (isNew ? 'box-shadow: 0 0 12px rgba(239,68,68,0.18); border-left-width: 4px;' : 'opacity:0.85;') + '">' +
+                    alertList.innerHTML += '<div class="incident ' + cssBorder + '" style="' + (isNew ? 'box-shadow: 0 0 12px rgba(239,68,68,0.25); border-left-width: 4px;' : 'opacity:0.9;') + '">' +
                         '<div class="severity ' + cssBg + '">' + a.severity.toUpperCase() + '</div>' +
                         '<div style="flex:1;"><h3 style="margin-bottom:5px;">' + cleanMsg + '</h3><p style="font-size:12px; color:#a2b5cd;">' + detailsStr + '</p></div>' +
                         '<div class="severity ' + statusBadgeClass + '" style="font-weight:700;">' + statusLabel + '</div>' +
@@ -7845,6 +7839,14 @@ function startAutoMonitor() {
         if (globalTick % 4 === 0) {
             if (typeof loadDashboardStats === 'function') loadDashboardStats();
             if (typeof checkGlobalAlertsWithSound === 'function') checkGlobalAlertsWithSound();
+            const alertsPage = document.getElementById('alerts');
+            if (alertsPage && alertsPage.classList.contains('active')) {
+                if (typeof loadAlerts === 'function') loadAlerts();
+            }
+            const reportsPage = document.getElementById('reports');
+            if (reportsPage && reportsPage.classList.contains('active')) {
+                if (typeof generateNMSReport === 'function') generateNMSReport();
+            }
         }
     }, 1000);
 }
@@ -7852,80 +7854,92 @@ window.startAutoMonitor = startAutoMonitor;
 
 let _seenAlertIds = null;
 
-async function checkGlobalAlertsWithSound() {
-    const token = localStorage.getItem('access_token');
-    if (!token) return;
-
-    try {
-        let enableAlerts = true;
-        try {
-            const s = JSON.parse(localStorage.getItem('nmsSettings') || '{}');
-            if (s.alert === false) enableAlerts = false;
-        } catch(e){}
-
-        if (!enableAlerts) return;
-
-        const apiBase = (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL) || (typeof NMS_API_BASE !== 'undefined' ? NMS_API_BASE : '');
-        const res = await fetch(`${apiBase}/api/alerts?_t=${Date.now()}`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
-        if (!res.ok) return;
-
-        const data = await res.json().catch(() => ({}));
-        if (!data.success || !Array.isArray(data.alerts)) return;
-
-        const currentAlerts = data.alerts;
-        const activeAlerts = currentAlerts.filter(a => a.status === 'New');
-        const activeCount = activeAlerts.length;
-
-        // Synchronize sidebar, header, and dashboard badge counters with active New alerts
-        const sbAlerts = document.getElementById('sidebarAlertsCount');
-        const hrAlerts = document.getElementById('headerAlertsCount');
-        const dashAlerts = document.getElementById('dashAlerts');
-        if (sbAlerts) sbAlerts.textContent = activeCount;
-        if (hrAlerts) hrAlerts.textContent = activeCount;
-        if (dashAlerts) dashAlerts.textContent = activeCount;
-
-        const currentIds = new Set(currentAlerts.map(a => Number(a.id)));
-
-        // Initial check on load: capture existing IDs without chime
-        if (_seenAlertIds === null) {
-            _seenAlertIds = currentIds;
-            return;
-        }
-
-        // Check for new unacknowledged alerts
-        let hasNew = false;
-        let newest = null;
-        for (const a of currentAlerts) {
-            const aid = Number(a.id);
-            if (!_seenAlertIds.has(aid)) {
-                hasNew = true;
-                _seenAlertIds.add(aid);
-                newest = a;
-            }
-        }
-
-        if (hasNew && newest) {
-            console.log("🚨 New alert detected:", newest);
-            playSound(true);
-            if (typeof toast === 'function') {
-                const icon = newest.severity === 'Critical' ? '🚨' : (newest.severity === 'Warning' ? '⚠️' : (newest.severity === 'Info' ? '✅' : 'ℹ️'));
-                toast(`${icon} ${newest.message}`);
-            }
-
-            // Always update alerts page if open
-            if (typeof loadAlerts === 'function') {
-                loadAlerts();
-            }
-            if (typeof loadDashboardStats === 'function') {
-                loadDashboardStats();
-            }
-        }
-    } catch (err) {
-        console.warn("Global alert checking error:", err);
-    }
-}
+async function checkGlobalAlertsWithSound() {
+    const token = localStorage.getItem('access_token');
+    if (!token) return;
+
+    try {
+        let soundEnabled = true;
+        try {
+            const s = JSON.parse(localStorage.getItem('nmsSettings') || '{}');
+            if (s.soundNotification === false || s.alert === false) soundEnabled = false;
+        } catch(e){}
+
+        const apiBase = (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL) || (typeof NMS_API_BASE !== 'undefined' ? NMS_API_BASE : '');
+        const res = await fetch(`${apiBase}/api/alerts?_t=${Date.now()}`, {
+            headers: { 'Authorization': 'Bearer ' + token }
+        });
+        if (!res.ok) return;
+
+        const data = await res.json().catch(() => ({}));
+        if (!data.success || !Array.isArray(data.alerts)) return;
+
+        const currentAlerts = data.alerts;
+        const activeAlerts = currentAlerts.filter(a => a.status === 'New' || a.status === 'Acknowledged');
+        const activeCount = activeAlerts.length;
+
+        // Synchronize sidebar, header, dashboard, and report badge counters
+        const sbAlerts = document.getElementById('sidebarAlertsCount');
+        const hrAlerts = document.getElementById('headerAlertsCount');
+        const dashAlerts = document.getElementById('dashAlerts');
+        const repAlerts = document.getElementById('reportActiveAlerts');
+        if (sbAlerts) sbAlerts.textContent = activeCount;
+        if (hrAlerts) hrAlerts.textContent = activeCount;
+        if (dashAlerts) dashAlerts.textContent = activeCount;
+        if (repAlerts) repAlerts.textContent = activeCount;
+
+        const activeBadge = document.getElementById('alertActiveBadge');
+        const allBadge = document.getElementById('alertAllBadge');
+        if (activeBadge) activeBadge.textContent = activeCount;
+        if (allBadge) allBadge.textContent = currentAlerts.length;
+
+        const currentIds = new Set(currentAlerts.map(a => Number(a.id)));
+
+        // Initial check on load: capture existing IDs without chime
+        if (_seenAlertIds === null) {
+            _seenAlertIds = currentIds;
+            return;
+        }
+
+        // Check for new unacknowledged alerts
+        let hasNew = false;
+        let newest = null;
+        for (const a of currentAlerts) {
+            const aid = Number(a.id);
+            if (!_seenAlertIds.has(aid) && a.status === 'New') {
+                hasNew = true;
+                _seenAlertIds.add(aid);
+                newest = a;
+            }
+        }
+
+        if (hasNew && newest) {
+            console.log("🚨 New alert detected:", newest);
+            if (soundEnabled && typeof playSound === 'function') {
+                playSound(true);
+            }
+            if (typeof toast === 'function') {
+                const icon = newest.severity === 'Critical' ? '🚨' : (newest.severity === 'Warning' ? '⚠️' : (newest.severity === 'Info' ? '✅' : 'ℹ️'));
+                toast(`${icon} ${newest.message}`);
+            }
+
+            // Always update alerts page if open
+            if (typeof loadAlerts === 'function') {
+                loadAlerts();
+            }
+            if (typeof loadDashboardStats === 'function') {
+                loadDashboardStats();
+            }
+            // Automatically refresh reports if reports tab is active
+            const reportsSection = document.getElementById('reports');
+            if (reportsSection && reportsSection.classList.contains('active') && typeof generateNMSReport === 'function') {
+                generateNMSReport();
+            }
+        }
+    } catch (err) {
+        console.warn("Global alert checking error:", err);
+    }
+}
 window.checkGlobalAlertsWithSound = checkGlobalAlertsWithSound;
 
 document.addEventListener('DOMContentLoaded', () => {

@@ -3734,6 +3734,7 @@ def automatic_ping_device(device):
         cursor.execute(
             """
             SELECT
+                status,
                 total_checks,
                 successful_checks
             FROM devices
@@ -3821,6 +3822,13 @@ def automatic_ping_device(device):
             )
         )
 
+        old_status = current.get("status") or device.get("status")
+        if (old_status and old_status != status) or (not old_status and status == "Offline"):
+            record_status_change_alert(
+                None, cursor, "Device",
+                device_code, device.get("device_name") or device_code,
+                old_status or "Online", status
+            )
 
         db.commit()
 
@@ -4134,6 +4142,7 @@ def automatic_ping_desktop(desktop):
         cursor.execute(
             """
             SELECT
+                status,
                 total_checks,
                 successful_checks
             FROM desktops
@@ -4200,6 +4209,14 @@ def automatic_ping_desktop(desktop):
                 desktop_id
             )
         )
+
+        old_status = current.get("status") or desktop.get("status")
+        if (old_status and old_status != status) or (not old_status and status == "Offline"):
+            record_status_change_alert(
+                None, cursor, "Desktop",
+                desktop_code, desktop.get("department") or desktop_code,
+                old_status or "Online", status
+            )
 
         db.commit()
 
@@ -4627,7 +4644,7 @@ def automatic_cctv_monitoring_loop():
                 try:
                     c_db = get_db_connection()
                     if c_db:
-                        c_cur = c_db.cursor()
+                        c_cur = c_db.cursor(dictionary=True)
                         c_cur.execute(
                             """
                             UPDATE cameras
@@ -4652,6 +4669,13 @@ def automatic_cctv_monitoring_loop():
                                 camera["id"]
                             )
                         )
+                        old_status = camera.get("status")
+                        if (old_status and old_status != status) or (not old_status and status == "Offline"):
+                            record_status_change_alert(
+                                None, c_cur, "Camera",
+                                camera["camera_code"], camera.get("camera_name") or camera["camera_code"],
+                                old_status or "Online", status
+                            )
                         c_db.commit()
                         c_cur.close()
                         c_db.close()
